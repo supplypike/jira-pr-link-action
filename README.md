@@ -1,6 +1,6 @@
 ## Usage:
 
-```
+```yaml
 name: JIRA Connection
 
 on:
