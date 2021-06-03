@@ -38,6 +38,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__webpack_require__(186));
 const github = __importStar(__webpack_require__(438));
+const options_1 = __webpack_require__(353);
 const pr_1 = __webpack_require__(515);
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -47,8 +48,7 @@ function run() {
                 return;
             }
             const ev = github.context.payload;
-            const project = core.getInput('project', { required: true });
-            const valid = pr_1.validate(ev, project);
+            const valid = pr_1.validate(ev, options_1.getInput());
             if (!valid) {
                 core.setFailed('Invalid Pull Request: missing JIRA project in title or branch');
             }
@@ -59,6 +59,46 @@ function run() {
     });
 }
 run();
+
+
+/***/ }),
+
+/***/ 353:
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getInput = void 0;
+const core = __importStar(__webpack_require__(186));
+function getInput() {
+    const project = core.getInput('project', { required: true });
+    const ignoreAuthor = core.getInput("ignore-author").split(",");
+    return {
+        project,
+        ignoreAuthor
+    };
+}
+exports.getInput = getInput;
 
 
 /***/ }),
@@ -76,8 +116,15 @@ exports.validate = void 0;
  * @param project jira project, can be regex
  * @returns true if valid link to jira
  */
-function validate(event, project) {
+function validate(event, options) {
+    const { project } = options;
     const re = RegExp(`${project}-[0-9]+`);
+    for (const author of options.ignoreAuthor) {
+        const authorRe = RegExp(author, "i");
+        if (event.pull_request.user.login.match(authorRe)) {
+            return true;
+        }
+    }
     if (event.pull_request.title.match(re)) {
         return true;
     }

@@ -22,3 +22,4 @@ jobs:
       - uses: ./
         with:
           project: SRENEW
+          ignore-author: dependabot
