@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
+import { getInput } from './options'
 import {validate} from './pr'
 
 async function run(): Promise<void> {
@@ -11,8 +12,7 @@ async function run(): Promise<void> {
     }
 
     const ev = github.context.payload as PullRequestEvent
-    const project = core.getInput('project', {required: true})
-    const valid = validate(ev, project)
+    const valid = validate(ev, getInput())
 
     if (!valid) {
       core.setFailed(
