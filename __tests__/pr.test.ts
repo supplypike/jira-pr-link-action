@@ -13,7 +13,7 @@ test('invalid PR', async () => {
   expect(validate(pr, project)).toEqual(false)
 })
 
-test.skip('valid PR title', async () => {
+test('valid PR title', async () => {
   mock.pull_request.title =
     'Update the README with new information | SRENEW-1234'
 
