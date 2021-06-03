@@ -1,16 +1,24 @@
 import * as core from '@actions/core'
-import {wait} from './wait'
+import * as github from '@actions/github'
+import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
+import {getInput} from './options'
+import {validate} from './pr'
 
 async function run(): Promise<void> {
   try {
-    const ms: string = core.getInput('milliseconds')
-    core.debug(`Waiting ${ms} milliseconds ...`) // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
+    if (github.context.eventName !== 'pull_request') {
+      core.debug('Not a pull request')
+      return
+    }
 
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+    const ev = github.context.payload as PullRequestEvent
+    const valid = validate(ev, getInput())
 
-    core.setOutput('time', new Date().toTimeString())
+    if (!valid) {
+      core.setFailed(
+        'Invalid Pull Request: missing JIRA project in title or branch'
+      )
+    }
   } catch (error) {
     core.setFailed(error.message)
   }
