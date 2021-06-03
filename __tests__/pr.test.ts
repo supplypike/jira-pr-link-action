@@ -1,7 +1,7 @@
 import {PullRequestEvent, PushEvent} from '@octokit/webhooks-definitions/schema'
 import {validate} from '../src/pr'
 import {pr} from '../src/mock/pull_request_mock'
-import { Options } from '../src/options'
+import {Options} from '../src/options'
 
 let options: Options
 let mock: PullRequestEvent
@@ -9,7 +9,7 @@ let mock: PullRequestEvent
 beforeEach(() => {
   mock = JSON.parse(JSON.stringify(pr))
 
-  options = { project: "SRENEW", ignoreAuthor: []}
+  options = {project: 'SRENEW', ignoreAuthor: []}
 })
 
 test('invalid PR', async () => {
@@ -31,14 +31,14 @@ test('valid PR branch', async () => {
 
 test('works with regex options', async () => {
   mock.pull_request.head.ref = 'foo-FOO-1234'
-  options.project = "[SRENEW|FOO]"
+  options.project = '[SRENEW|FOO]'
 
   expect(validate(mock, options)).toEqual(true)
 })
 
 test('valid if ignoreAuthor matches', async () => {
-  options.ignoreAuthor = ["dependabot"]
-  mock.pull_request.user.login = "dependabot"
+  options.ignoreAuthor = ['dependabot']
+  mock.pull_request.user.login = 'dependabot'
 
   expect(validate(mock, options)).toEqual(true)
 })

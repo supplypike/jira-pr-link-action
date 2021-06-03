@@ -1,5 +1,5 @@
 import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
-import { Options } from './options'
+import {Options} from './options'
 
 /**
  * Pull requests are linked automatically if the issue key is included in the pull request's title or in the source branch name
@@ -8,11 +8,11 @@ import { Options } from './options'
  * @returns true if valid link to jira
  */
 export function validate(event: PullRequestEvent, options: Options): boolean {
-  const { project } = options
+  const {project} = options
   const re = RegExp(`${project}-[0-9]+`)
 
   for (const author of options.ignoreAuthor) {
-    const authorRe = RegExp(author, "i")
+    const authorRe = RegExp(author, 'i')
     if (event.pull_request.user.login.match(authorRe)) {
       return true
     }
