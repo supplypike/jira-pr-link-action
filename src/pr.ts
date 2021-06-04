@@ -12,8 +12,7 @@ export function validate(event: PullRequestEvent, options: Options): boolean {
   const re = RegExp(`${project}-[0-9]+`)
 
   for (const author of options.ignoreAuthor) {
-    const authorRe = RegExp(author, 'i')
-    if (event.pull_request.user.login.match(authorRe)) {
+    if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {
       return true
     }
   }
