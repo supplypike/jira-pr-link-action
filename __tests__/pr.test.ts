@@ -37,8 +37,8 @@ test('works with regex options', async () => {
 })
 
 test('valid if ignoreAuthor matches', async () => {
-  options.ignoreAuthor = ['dependabot']
-  mock.pull_request.user.login = 'dependabot'
+  options.ignoreAuthor = ['dependabot[bot]']
+  mock.pull_request.user.login = 'dependabot[bot]'
 
   expect(validate(mock, options)).toEqual(true)
 })
