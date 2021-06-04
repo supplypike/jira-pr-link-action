@@ -12,9 +12,9 @@ export function validate(event: PullRequestEvent, options: Options): boolean {
   const {project} = options
   const re = RegExp(`${project}-[0-9]+`)
 
-  core.info("author " + event.pull_request.user.login.toLowerCase())
-  core.info("title " + event.pull_request.title)
-  core.info("head " + event.pull_request.head.ref)
+  core.info('author ' + event.pull_request.user.login.toLowerCase())
+  core.info('title ' + event.pull_request.title)
+  core.info('head ' + event.pull_request.head.ref)
 
   for (const author of options.ignoreAuthor) {
     if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {

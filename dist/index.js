@@ -92,7 +92,7 @@ exports.getInput = void 0;
 const core = __importStar(__webpack_require__(186));
 function getInput() {
     const project = core.getInput('project', { required: true });
-    const ignoreAuthor = core.getInput("ignore-author").split(",");
+    const ignoreAuthor = core.getInput('ignore-author').split(',');
     return {
         project,
         ignoreAuthor
@@ -104,12 +104,32 @@ exports.getInput = getInput;
 /***/ }),
 
 /***/ 515:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.validate = void 0;
+const core = __importStar(__webpack_require__(186));
 /**
  * Pull requests are linked automatically if the issue key is included in the pull request's title or in the source branch name
  * @param event github pull request
@@ -119,9 +139,11 @@ exports.validate = void 0;
 function validate(event, options) {
     const { project } = options;
     const re = RegExp(`${project}-[0-9]+`);
+    core.info("author " + event.pull_request.user.login.toLowerCase());
+    core.info("title " + event.pull_request.title);
+    core.info("head " + event.pull_request.head.ref);
     for (const author of options.ignoreAuthor) {
-        const authorRe = RegExp(author, "i");
-        if (event.pull_request.user.login.match(authorRe)) {
+        if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {
             return true;
         }
     }
