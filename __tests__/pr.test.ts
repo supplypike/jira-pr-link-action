@@ -1,4 +1,4 @@
-import { PullRequestEvent } from '@octokit/webhooks-types'
+import {PullRequestEvent} from '@octokit/webhooks-types'
 import {validate} from '../src/pr'
 import {pr} from '../src/mock/pull_request_mock'
 import {Options} from '../src/options'

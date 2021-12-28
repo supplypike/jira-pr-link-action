@@ -408,24 +408,19 @@ export const pr: PullRequestEvent = {
         href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2'
       },
       comments: {
-        href:
-          'https://api.github.com/repos/Codertocat/Hello-World/issues/2/comments'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2/comments'
       },
       review_comments: {
-        href:
-          'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/comments'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/comments'
       },
       review_comment: {
-        href:
-          'https://api.github.com/repos/Codertocat/Hello-World/pulls/comments{/number}'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/comments{/number}'
       },
       commits: {
-        href:
-          'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/commits'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/commits'
       },
       statuses: {
-        href:
-          'https://api.github.com/repos/Codertocat/Hello-World/statuses/ec26c3e57ca3a959ca5aad62de7213c562f8c821'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/statuses/ec26c3e57ca3a959ca5aad62de7213c562f8c821'
       }
     },
     author_association: 'OWNER',
