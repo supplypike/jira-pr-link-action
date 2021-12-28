@@ -7,6 +7,26 @@
       "sourceType": "module",
       "project": "./tsconfig.json"
     },
+    "overrides": [
+      {
+        "files": ["__tests__/**"],
+        "plugins": ["jest"],
+        "rules": {
+          "@typescript-eslint/unbound-method": "off",
+          "@typescript-eslint/no-explicit-any": "off",
+          "filenames/match-regex": "off",
+          "jest/unbound-method": "error"
+        }
+      },
+      {
+        "files": ["src/mock/**"],
+        "plugins": [],
+        "rules": {
+          "filenames/match-regex": "off",
+          "import/no-unresolved": "off" //@octokit/webhooks-types is installed. I guess eslint doesn't like using a d.ts files that isn't index.d.ts
+        }
+      }
+    ],
     "rules": {
       "eslint-comments/no-use": "off",
       "import/no-namespace": "off",
