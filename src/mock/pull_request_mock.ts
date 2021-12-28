@@ -1,6 +1,6 @@
 import {PullRequestEvent} from '@octokit/webhooks-types'
 
-export const pullRequestMock: PullRequestEvent = {
+export const pr: PullRequestEvent = {
   action: 'opened',
   number: 2,
   pull_request: {

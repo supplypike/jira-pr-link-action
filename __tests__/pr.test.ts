@@ -1,19 +1,19 @@
 import { PullRequestEvent } from '@octokit/webhooks-types'
 import {validate} from '../src/pr'
-import {pullRequestMock} from '../src/mock/pullRequestMock'
+import {pr} from '../src/mock/pull_request_mock'
 import {Options} from '../src/options'
 
 let options: Options
 let mock: PullRequestEvent
 
 beforeEach(() => {
-  mock = JSON.parse(JSON.stringify(pullRequestMock))
+  mock = JSON.parse(JSON.stringify(pr))
 
   options = {project: 'SRENEW', ignoreAuthor: []}
 })
 
 test('invalid PR', async () => {
-  expect(validate(pullRequestMock, options)).toEqual(false)
+  expect(validate(pr, options)).toEqual(false)
 })
 
 test('valid PR title', async () => {
