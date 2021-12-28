@@ -1,5 +1,5 @@
 import * as core from '@actions/core'
-import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
+import {PullRequestEvent} from '@octokit/webhooks-types'
 import {Options} from './options'
 
 /**

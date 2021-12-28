@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
-import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
+import {PullRequestEvent} from '@octokit/webhooks-types'
 import {getInput} from './options'
 import {validate} from './pr'
 

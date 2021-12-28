@@ -1,6 +1,6 @@
-import {PullRequestEvent} from '@octokit/webhooks-definitions/schema'
+import {PullRequestEvent} from '@octokit/webhooks-types'
 
-export const pr: PullRequestEvent = {
+export const pullRequestMock: PullRequestEvent = {
   action: 'opened',
   number: 2,
   pull_request: {
@@ -92,6 +92,9 @@ export const pr: PullRequestEvent = {
         site_admin: false
       },
       repo: {
+        is_template: false,
+        topics: [],
+        visibility: 'private',
         id: 186853002,
         node_id: 'MDEwOlJlcG9zaXRvcnkxODY4NTMwMDI=',
         name: 'Hello-World',
@@ -256,6 +259,9 @@ export const pr: PullRequestEvent = {
         site_admin: false
       },
       repo: {
+        is_template: false,
+        topics: [],
+        visibility: 'private',
         id: 186853002,
         node_id: 'MDEwOlJlcG9zaXRvcnkxODY4NTMwMDI=',
         name: 'Hello-World',
@@ -438,6 +444,9 @@ export const pr: PullRequestEvent = {
     changed_files: 1
   },
   repository: {
+    is_template: false,
+    topics: [],
+    visibility: 'private',
     id: 186853002,
     node_id: 'MDEwOlJlcG9zaXRvcnkxODY4NTMwMDI=',
     name: 'Hello-World',
