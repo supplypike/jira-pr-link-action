@@ -1,5 +1,5 @@
 import {Version3Client} from 'jira.js'
-
+import * as core from '@actions/core'
 export interface JiraConfig {
   host: string
   username: string
@@ -30,6 +30,7 @@ export class JiraClientImpl implements JiraClient {
       await this.client.issues.getIssue({issueIdOrKey})
       return true
     } catch (error) {
+      core.debug(`getIssue error: ${error}`)
       return false
     }
   }
