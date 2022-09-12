@@ -78539,13 +78539,13 @@ exports.JiraClientImpl = void 0;
 const jira_js_1 = __nccwpck_require__(74689);
 const core = __importStar(__nccwpck_require__(42186));
 class JiraClientImpl {
-    constructor({ host, username, password }) {
+    constructor({ host, email, apiToken }) {
         this.client = new jira_js_1.Version3Client({
             host,
             authentication: {
                 basic: {
-                    username,
-                    password
+                    email,
+                    apiToken
                 }
             }
         });
@@ -78673,15 +78673,15 @@ function getInput() {
     const project = core.getInput('project', { required: true });
     const ignoreAuthor = core.getInput('ignore-author').split(',');
     const jiraHost = core.getInput('jira-host', { required: true });
-    const jiraUsername = core.getInput('jira-username', { required: true });
-    const jiraPassword = core.getInput('jira-password', { required: true });
+    const jiraEmail = core.getInput('jira-email', { required: true });
+    const jiraToken = core.getInput('jira-api-token', { required: true });
     return {
         project,
         ignoreAuthor,
         jira: {
             host: jiraHost,
-            username: jiraUsername,
-            password: jiraPassword
+            email: jiraEmail,
+            apiToken: jiraToken
         }
     };
 }

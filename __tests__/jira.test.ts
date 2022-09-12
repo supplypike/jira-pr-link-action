@@ -11,8 +11,8 @@ beforeEach(() => {
 describe('JiraClientImpl', () => {
   const jiraConfig: JiraConfig = {
     host: 'https://jira.example.com',
-    username: 'user',
-    password: 'pass'
+    email: 'test@example.com',
+    apiToken: '1234567890'
   }
 
   test('constructor', async () => {
@@ -22,8 +22,8 @@ describe('JiraClientImpl', () => {
       host: 'https://jira.example.com',
       authentication: {
         basic: {
-          username: 'user',
-          password: 'pass'
+          email: 'test@example.com',
+          apiToken: '1234567890'
         }
       }
     })

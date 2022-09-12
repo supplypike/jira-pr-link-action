@@ -18,7 +18,11 @@ beforeEach(() => {
   options = {
     project: 'SRENEW',
     ignoreAuthor: [],
-    jira: {host: 'https://jira.example.com', username: 'user', password: 'pass'}
+    jira: {
+      host: 'https://jira.example.com',
+      email: 'test@example.com',
+      apiToken: '1234567890'
+    }
   }
 })
 

@@ -19,5 +19,5 @@ jobs:
           ignore-author: dependabot[bot],supplypiker
           project: 'SRENEW'
           jira-host: ${{ secrets.JIRA_HOST }}
-          jira-username: ${{ secrets.JIRA_USERNAME }}
-          jira-password: ${{ secrets.JIRA_PASSWORD }}
+          jira-email: ${{ secrets.JIRA_EMAIL }}
+          jira-api-token: ${{ secrets.JIRA_API_TOKEN }}

@@ -10,13 +10,13 @@ inputs:
     description: "comma seperated list of authors to skip check for"
   jira-host:
     required: true
-    description: "JIRA domain"
-  jira-username:
+    description: "JIRA Domain"
+  jira-email:
     required: true
-    description: "JIRA username"
-  jira-password:
+    description: "JIRA Login"
+  jira-api-token:
     required: true
-    description: "JIRA password"
+    description: "JIRA API Token"
 runs:
   using: 'node12'
   main: 'dist/index.js'
