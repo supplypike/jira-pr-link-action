@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import {PullRequestEvent} from '@octokit/webhooks-types'
-import { JiraClientImpl } from './jira'
+import {JiraClientImpl} from './jira'
 import {Options} from './options'
 
 /**
@@ -9,9 +9,12 @@ import {Options} from './options'
  * @param project jira project, can be regex
  * @returns true if valid link to jira
  */
-export async function validate(event: PullRequestEvent, options: Options): Promise<boolean> {
+export async function validate(
+  event: PullRequestEvent,
+  options: Options
+): Promise<boolean> {
   const {project} = options
-  const re = RegExp(`(${project}-[0-9]+)+`, "g")
+  const re = RegExp(`(${project}-[0-9]+)+`, 'g')
 
   const jira = new JiraClientImpl(options.jira)
 
@@ -35,10 +38,10 @@ export async function validate(event: PullRequestEvent, options: Options): Promi
   }
 
   for (const match of matches) {
-    core.debug("Checking Jira issue " + match)
+    core.debug('Checking Jira issue ' + match)
     const exists = await jira.issueExists(match)
     if (!exists) {
-      core.error("Issue does not exist: " + match)
+      core.error('Issue does not exist: ' + match)
       return false
     }
   }

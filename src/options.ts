@@ -1,4 +1,5 @@
 import * as core from '@actions/core'
+import {JiraConfig} from './jira'
 
 export interface Options {
   project: string
@@ -19,7 +20,7 @@ export function getInput(): Options {
     jira: {
       host: jiraHost,
       username: jiraUsername,
-      password: jiraPassword,
+      password: jiraPassword
     }
   }
 }

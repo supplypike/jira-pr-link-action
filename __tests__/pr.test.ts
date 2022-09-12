@@ -4,19 +4,22 @@ import {pr} from '../src/mock/pull_request_mock'
 import {Options} from '../src/options'
 import {JiraClientImpl} from '../src/jira'
 
-
 let options: Options
 let mock: PullRequestEvent
-let jiraSpy: jest.SpyInstance
 
-jest.mock("@actions/core")
-jest.mock("../src/jira")
+jest.mock('@actions/core')
+jest.mock('../src/jira')
+const mockClient = jest.mocked(JiraClientImpl, true)
 
 beforeEach(() => {
   mock = JSON.parse(JSON.stringify(pr))
+  mockClient.prototype.issueExists.mockResolvedValue(true)
 
-  jiraSpy = jest.spyOn(JiraClientImpl.prototype, "issueExists").mockResolvedValue(true)
-  options = {project: 'SRENEW', ignoreAuthor: [], jira: {host: 'https://jira.example.com', username: 'user', password: 'pass'}}
+  options = {
+    project: 'SRENEW',
+    ignoreAuthor: [],
+    jira: {host: 'https://jira.example.com', username: 'user', password: 'pass'}
+  }
 })
 
 test('invalid PR', async () => {
@@ -51,7 +54,7 @@ test('valid if ignoreAuthor matches', async () => {
 })
 
 test('invalid when jira card does not exist', async () => {
-  jest.spyOn(JiraClientImpl.prototype, "issueExists").mockResolvedValue(false)
+  jest.spyOn(JiraClientImpl.prototype, 'issueExists').mockResolvedValue(false)
 
   mock.pull_request.title =
     'Update the README with new information | SRENEW-0000'
@@ -60,7 +63,9 @@ test('invalid when jira card does not exist', async () => {
 })
 
 test('invalid when one jira card does not exist', async () => {
-  jest.spyOn(JiraClientImpl.prototype, "issueExists").mockImplementation(x => Promise.resolve(x === 'SRENEW-1234'))
+  mockClient.prototype.issueExists.mockImplementation(x =>
+    Promise.resolve(x === 'SRENEW-1234')
+  )
 
   mock.pull_request.title =
     'Update the README with new information | SRENEW-0000,SRENEW-1234'
