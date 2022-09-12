@@ -8,6 +8,15 @@ inputs:
   ignore-author:
     required: false
     description: "comma seperated list of authors to skip check for"
+  jira-host:
+    required: true
+    description: "JIRA domain"
+  jira-username:
+    required: true
+    description: "JIRA username"
+  jira-password:
+    required: true
+    description: "JIRA password"
 runs:
   using: 'node12'
   main: 'dist/index.js'

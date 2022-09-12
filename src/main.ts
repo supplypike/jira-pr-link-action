@@ -12,7 +12,8 @@ async function run(): Promise<void> {
     }
 
     const ev = github.context.payload as PullRequestEvent
-    const valid = validate(ev, getInput())
+
+    const valid = await validate(ev, getInput())
 
     if (!valid) {
       core.setFailed(
