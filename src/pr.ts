@@ -1,7 +1,28 @@
 import * as core from '@actions/core'
+import {Context} from '@actions/github/lib/context'
 import {PullRequestEvent} from '@octokit/webhooks-types'
 import {JiraClientImpl} from './jira'
-import {Options} from './options'
+import {getInput, Options} from './options'
+
+export async function process(
+  context: Context,
+  isValid = validate
+): Promise<void> {
+  console.log(context.eventName)
+  if (context.eventName !== 'pull_request') {
+    core.debug('Not a pull request')
+    return
+  }
+
+  const ev = context.payload as PullRequestEvent
+  const valid = await isValid(ev, getInput())
+
+  if (!valid) {
+    core.setFailed(
+      'Invalid Pull Request: missing JIRA project in title or branch'
+    )
+  }
+}
 
 /**
  * Pull requests are linked automatically if the issue key is included in the pull request's title or in the source branch name

@@ -9,7 +9,7 @@ export interface Options {
 
 export function getInput(): Options {
   const project = core.getInput('project', {required: true})
-  const ignoreAuthor = core.getInput('ignore-author').split(',')
+  const ignoreAuthor = core.getMultilineInput('ignore-author') || []
   const jiraHost = core.getInput('jira-host', {required: true})
   const jiraEmail = core.getInput('jira-email', {required: true})
   const jiraToken = core.getInput('jira-api-token', {required: true})

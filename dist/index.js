@@ -78606,34 +78606,22 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const core = __importStar(__nccwpck_require__(42186));
+exports.main = void 0;
 const github = __importStar(__nccwpck_require__(95438));
-const options_1 = __nccwpck_require__(26159);
+const core = __importStar(__nccwpck_require__(42186));
 const pr_1 = __nccwpck_require__(34480);
-function run() {
+function main() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            if (github.context.eventName !== 'pull_request') {
-                core.debug('Not a pull request');
-                return;
-            }
-            const ev = github.context.payload;
-            const valid = yield (0, pr_1.validate)(ev, (0, options_1.getInput)());
-            if (!valid) {
-                core.setFailed('Invalid Pull Request: missing JIRA project in title or branch');
-            }
+            yield (0, pr_1.process)(github.context);
         }
         catch (error) {
-            if (error instanceof Error) {
-                core.setFailed(error.message);
-            }
-            else {
-                core.error(JSON.stringify(error));
-            }
+            core.error(`Error caught in main: ${error}`);
         }
     });
 }
-run();
+exports.main = main;
+main();
 
 
 /***/ }),
@@ -78728,9 +78716,25 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.validate = void 0;
+exports.validate = exports.process = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 const jira_1 = __nccwpck_require__(42222);
+const options_1 = __nccwpck_require__(26159);
+function process(context, isValid = validate) {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log(context.eventName);
+        if (context.eventName !== 'pull_request') {
+            core.debug('Not a pull request');
+            return;
+        }
+        const ev = context.payload;
+        const valid = yield isValid(ev, (0, options_1.getInput)());
+        if (!valid) {
+            core.setFailed('Invalid Pull Request: missing JIRA project in title or branch');
+        }
+    });
+}
+exports.process = process;
 /**
  * Pull requests are linked automatically if the issue key is included in the pull request's title or in the source branch name
  * @param event github pull request

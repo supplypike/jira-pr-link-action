@@ -2,6 +2,7 @@ import {Version3Client} from 'jira.js'
 import {JiraClient, JiraClientImpl, JiraConfig} from '../src/jira'
 
 jest.mock('jira.js')
+jest.mock('@actions/core')
 const mockJira = jest.mocked(Version3Client, true)
 
 beforeEach(() => {
