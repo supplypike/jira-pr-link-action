@@ -10,16 +10,21 @@ jobs:
   build: # make sure build/ci work properly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+      - name: Set Node.js 16.x
+        uses: actions/setup-node@v3
+        with:
+          node-version-file: .tool-versions
+          cache: 'npm'
       - run: |
-          npm install
+          npm ci
       - run: |
           npm run all
-  test: # make sure the action works on a clean machine without building
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: ./
+      - uses: sonarsource/sonarqube-scan-action@v1.1.0
         with:
-          project: SRENEW
-          ignore-author: dependabot[bot]
+          args: >
+            -D sonar.projectKey=supplypike_jira-pr-link-action
+            -D sonar.projectName=jira-pr-link-action
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

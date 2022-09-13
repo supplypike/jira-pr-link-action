@@ -1,31 +1,13 @@
-import * as core from '@actions/core'
 import * as github from '@actions/github'
-import {PullRequestEvent} from '@octokit/webhooks-types'
-import {getInput} from './options'
-import {validate} from './pr'
+import * as core from '@actions/core'
+import {process} from './pr'
 
-async function run(): Promise<void> {
+export async function main(): Promise<void> {
   try {
-    if (github.context.eventName !== 'pull_request') {
-      core.debug('Not a pull request')
-      return
-    }
-
-    const ev = github.context.payload as PullRequestEvent
-    const valid = validate(ev, getInput())
-
-    if (!valid) {
-      core.setFailed(
-        'Invalid Pull Request: missing JIRA project in title or branch'
-      )
-    }
+    await process(github.context)
   } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed(error.message)
-    } else {
-      core.error(JSON.stringify(error))
-    }
+    core.error(`Error caught in main: ${error}`)
   }
 }
 
-run()
+main()
