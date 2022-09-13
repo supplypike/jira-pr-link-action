@@ -1,5 +1,5 @@
 name: 'jira-pr-link-action'
-description: "ensures PRs can link to JIRA card"
+description: 'ensures PRs can link to JIRA card'
 author: 'supplypike'
 inputs:
   project:
@@ -7,16 +7,16 @@ inputs:
     description: 'JIRA Project'
   ignore-author:
     required: false
-    description: "comma seperated list of authors to skip check for"
+    description: 'comma seperated list of authors to skip check for'
   jira-host:
     required: true
-    description: "JIRA Domain"
+    description: 'JIRA Domain'
   jira-email:
     required: true
-    description: "JIRA Login"
+    description: 'JIRA Login'
   jira-api-token:
     required: true
-    description: "JIRA API Token"
+    description: 'JIRA API Token'
 runs:
-  using: 'node12'
+  using: 'node16'
   main: 'dist/index.js'

@@ -8,7 +8,6 @@ export async function process(
   context: Context,
   isValid = validate
 ): Promise<void> {
-  console.log(context.eventName)
   if (context.eventName !== 'pull_request') {
     core.debug('Not a pull request')
     return

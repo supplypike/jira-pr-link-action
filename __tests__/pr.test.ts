@@ -49,9 +49,12 @@ describe('#validate', () => {
   })
 
   test('works with regex options', async () => {
-    mock.pull_request.head.ref = 'foo-FOO-1234'
-    options.project = '(?:SRENEW|FOO)'
+    options.project = '(SRENEW|FOO)'
 
+    mock.pull_request.head.ref = 'foo-FOO-1234'
+    expect(await validate(mock, options)).toEqual(true)
+
+    mock.pull_request.head.ref = 'foo-SRENEW-1234'
     expect(await validate(mock, options)).toEqual(true)
   })
 

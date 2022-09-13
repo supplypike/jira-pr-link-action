@@ -78659,7 +78659,7 @@ exports.getInput = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 function getInput() {
     const project = core.getInput('project', { required: true });
-    const ignoreAuthor = core.getInput('ignore-author').split(',');
+    const ignoreAuthor = core.getMultilineInput('ignore-author') || [];
     const jiraHost = core.getInput('jira-host', { required: true });
     const jiraEmail = core.getInput('jira-email', { required: true });
     const jiraToken = core.getInput('jira-api-token', { required: true });
@@ -78722,7 +78722,6 @@ const jira_1 = __nccwpck_require__(42222);
 const options_1 = __nccwpck_require__(26159);
 function process(context, isValid = validate) {
     return __awaiter(this, void 0, void 0, function* () {
-        console.log(context.eventName);
         if (context.eventName !== 'pull_request') {
             core.debug('Not a pull request');
             return;
