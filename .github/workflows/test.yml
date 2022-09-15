@@ -21,6 +21,7 @@ jobs:
       - run: |
           npm run all
       - uses: sonarsource/sonarqube-scan-action@v1.1.0
+        if: ${{ github.actor != 'dependabot[bot]' }}
         with:
           args: >
             -D sonar.projectKey=supplypike_jira-pr-link-action
