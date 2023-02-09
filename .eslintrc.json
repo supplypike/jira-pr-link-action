@@ -1,6 +1,112 @@
 {
-  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
-  "parser": "@typescript-eslint/parser",
-  "plugins": ["@typescript-eslint"],
-  "root": true
+  "extends": [
+    "airbnb",
+    "prettier",
+    "plugin:import/errors",
+    "plugin:import/warnings",
+    "plugin:react-hooks/recommended",
+    "plugin:cypress/recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:@next/next/recommended"
+  ],
+  "overrides": [
+    {
+      "files": ["**/*.test.js*(x)"],
+      "plugins": ["jest"],
+      "extends": ["plugin:jest/recommended"]
+    }
+  ],
+  "plugins": ["lodash-fp", "prettier", "immutable", "aumni", "cypress"],
+  "env": {
+    "es2022": true,
+    "browser": true,
+    "jest/globals": true,
+    "cypress/globals": true
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    },
+    "import/resolver": {
+      "node": {
+        "extensions": [".js", ".jsx", ".ts", ".tsx"],
+        "moduleDirectory": ["node_modules"],
+        "paths": ["src"]
+      }
+    }
+  },
+  "rules": {
+    // @typeScript-eslint needs to remain installed (for now) so that ESLint
+    // can parse newer features. We don't need it's rules though.
+    "@typescript-eslint/no-unused-vars": "off",
+    "@typescript-eslint/no-empty-function": "off",
+    "@typescript-eslint/no-var-requires": "off",
+    "aumni/prefer-destructured-prop-types": 2,
+    "import/order": [
+      "error",
+      {
+        "newlines-between": "always",
+        "groups": ["external", "internal", ["parent", "sibling"], "index"]
+      }
+    ],
+    "arrow-body-style": ["error", "as-needed"],
+    "default-param-last": "off",
+    "immutable/no-let": "error",
+    "import/prefer-default-export": "off",
+    "import/no-extraneous-dependencies": [
+      "error",
+      {
+        "devDependencies": [
+          "**/*.test.js*(x)",
+          "**/*.cy.jsx",
+          "**/*.cy.tsx",
+          "**/testUtils/*",
+          "jest.*.js",
+          "**/mock.js",
+          "**/mocks/*",
+          "cypress/**",
+          "cypress.config.js"
+        ]
+      }
+    ],
+    "jsx-a11y/label-has-for": "off",
+    "jsx-a11y/label-has-associated-control": [
+      2,
+      {
+        "labelComponents": ["CustomInputLabel"],
+        "labelAttributes": ["label"],
+        "controlComponents": ["CustomInput"],
+        "depth": 3
+      }
+    ],
+    "no-loop-func": "error",
+    "no-unused-vars": [
+      2,
+      {"varsIgnorePattern": "^_.+", "argsIgnorePattern": "^_"}
+    ],
+    "prettier/prettier": "error",
+    "react/jsx-fragments": [2, "syntax"],
+    "react-hooks/exhaustive-deps": [2],
+    "react/function-component-definition": [
+      2,
+      {
+        "namedComponents": "arrow-function",
+        "unnamedComponents": "arrow-function"
+      }
+    ],
+    "react/jsx-no-target-blank": [
+      2,
+      {
+        "allowReferrer": false,
+        "enforceDynamicLinks": "always"
+      }
+    ],
+    "react/no-unstable-nested-components": "off", // https://app.shortcut.com/aumni/story/20660/fix-react-no-unstable-nested-components-problems
+    "react/jsx-props-no-spreading": 0,
+    // "react/prop-types": 0,
+    "react/react-in-jsx-scope": 0,
+    "react/require-default-props": 0,
+    "react/jsx-filename-extension": [2, {"extensions": [".jsx", ".tsx"]}],
+    "import/extensions": 0
+  }
 }

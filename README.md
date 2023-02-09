@@ -18,8 +18,8 @@ jobs:
     steps:
       - name: Check for JIRA ISSUE
         id: check
-        uses: supplypike/jira-pr-link-action@v1
+        uses: aumni-fund/tool-github-action-jira-pr-link@v1
         with:
           ignore-author: dependabot[bot]
-          project: "SRENEW"
+          project: 'DEV'
 ```
