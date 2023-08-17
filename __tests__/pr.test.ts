@@ -11,7 +11,7 @@ let mock: PullRequestEvent
 
 jest.mock('@actions/core')
 jest.mock('../src/jira')
-const mockClient = jest.mocked(JiraClientImpl, true)
+const mockClient = jest.mocked(JiraClientImpl, {shallow: true})
 
 beforeEach(() => {
   options = {
