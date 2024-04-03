@@ -79133,20 +79133,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.JiraClientImpl = void 0;
 const jira_js_1 = __nccwpck_require__(74689);
 const core = __importStar(__nccwpck_require__(42186));
 class JiraClientImpl {
+    client;
     constructor({ host, email, apiToken }) {
         this.client = new jira_js_1.Version3Client({
             host,
@@ -79158,17 +79150,15 @@ class JiraClientImpl {
             }
         });
     }
-    issueExists(issueIdOrKey) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                yield this.client.issues.getIssue({ issueIdOrKey });
-                return true;
-            }
-            catch (error) {
-                core.debug(`getIssue error: ${error}`);
-                return false;
-            }
-        });
+    async issueExists(issueIdOrKey) {
+        try {
+            await this.client.issues.getIssue({ issueIdOrKey });
+            return true;
+        }
+        catch (error) {
+            core.debug(`getIssue error: ${error}`);
+            return false;
+        }
     }
 }
 exports.JiraClientImpl = JiraClientImpl;
@@ -79204,29 +79194,18 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.main = void 0;
 const github = __importStar(__nccwpck_require__(95438));
 const core = __importStar(__nccwpck_require__(42186));
 const pr_1 = __nccwpck_require__(34480);
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            yield (0, pr_1.process)(github.context);
-        }
-        catch (error) {
-            core.error(`Error caught in main: ${error}`);
-        }
-    });
+async function main() {
+    try {
+        await (0, pr_1.process)(github.context);
+    }
+    catch (error) {
+        core.error(`Error caught in main: ${error}`);
+    }
 }
 exports.main = main;
 main();
@@ -79314,32 +79293,21 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.validate = exports.process = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 const jira_1 = __nccwpck_require__(42222);
 const options_1 = __nccwpck_require__(26159);
-function process(context, isValid = validate) {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (context.eventName !== 'pull_request') {
-            core.debug('Not a pull request');
-            return;
-        }
-        const ev = context.payload;
-        const valid = yield isValid(ev, (0, options_1.getInput)());
-        if (!valid) {
-            core.setFailed('Invalid Pull Request: missing JIRA project in title or branch');
-        }
-    });
+async function process(context, isValid = validate) {
+    if (context.eventName !== 'pull_request') {
+        core.debug('Not a pull request');
+        return;
+    }
+    const ev = context.payload;
+    const valid = await isValid(ev, (0, options_1.getInput)());
+    if (!valid) {
+        core.setFailed('Invalid Pull Request: missing JIRA project in title or branch');
+    }
 }
 exports.process = process;
 /**
@@ -79348,36 +79316,34 @@ exports.process = process;
  * @param project jira project, can be regex
  * @returns true if valid link to jira
  */
-function validate(event, options) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const { project } = options;
-        const re = RegExp(`(${project}-[0-9]+)+`, 'g');
-        const jira = new jira_1.JiraClientImpl(options.jira);
-        core.debug('author ' + event.pull_request.user.login.toLowerCase());
-        core.debug('title ' + event.pull_request.title);
-        core.debug('head ' + event.pull_request.head.ref);
-        for (const author of options.ignoreAuthor) {
-            if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {
-                return true;
-            }
+async function validate(event, options) {
+    const { project } = options;
+    const re = RegExp(`(${project}-[0-9]+)+`, 'g');
+    const jira = new jira_1.JiraClientImpl(options.jira);
+    core.debug('author ' + event.pull_request.user.login.toLowerCase());
+    core.debug('title ' + event.pull_request.title);
+    core.debug('head ' + event.pull_request.head.ref);
+    for (const author of options.ignoreAuthor) {
+        if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {
+            return true;
         }
-        const titleMatch = event.pull_request.title.match(re) || [];
-        const refMatch = event.pull_request.head.ref.match(re) || [];
-        const matches = [...titleMatch, ...refMatch];
-        if (matches.length < 1) {
-            core.error(`No Jira issue found for ${project} in PR title or branch`);
+    }
+    const titleMatch = event.pull_request.title.match(re) || [];
+    const refMatch = event.pull_request.head.ref.match(re) || [];
+    const matches = [...titleMatch, ...refMatch];
+    if (matches.length < 1) {
+        core.error(`No Jira issue found for ${project} in PR title or branch`);
+        return false;
+    }
+    for (const match of matches) {
+        core.debug('Checking Jira issue ' + match);
+        const exists = await jira.issueExists(match);
+        if (!exists) {
+            core.error('Issue does not exist: ' + match);
             return false;
         }
-        for (const match of matches) {
-            core.debug('Checking Jira issue ' + match);
-            const exists = yield jira.issueExists(match);
-            if (!exists) {
-                core.error('Issue does not exist: ' + match);
-                return false;
-            }
-        }
-        return true;
-    });
+    }
+    return true;
 }
 exports.validate = validate;
 
