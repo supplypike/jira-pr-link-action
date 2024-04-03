@@ -140,7 +140,6 @@ const file_command_1 = __nccwpck_require__(717);
 const utils_1 = __nccwpck_require__(5278);
 const os = __importStar(__nccwpck_require__(22037));
 const path = __importStar(__nccwpck_require__(71017));
-const uuid_1 = __nccwpck_require__(75840);
 const oidc_utils_1 = __nccwpck_require__(98041);
 /**
  * The code to exit an action
@@ -170,20 +169,9 @@ function exportVariable(name, val) {
     process.env[name] = convertedVal;
     const filePath = process.env['GITHUB_ENV'] || '';
     if (filePath) {
-        const delimiter = `ghadelimiter_${uuid_1.v4()}`;
-        // These should realistically never happen, but just in case someone finds a way to exploit uuid generation let's not allow keys or values that contain the delimiter.
-        if (name.includes(delimiter)) {
-            throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
-        }
-        if (convertedVal.includes(delimiter)) {
-            throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
-        }
-        const commandValue = `${name}<<${delimiter}${os.EOL}${convertedVal}${os.EOL}${delimiter}`;
-        file_command_1.issueCommand('ENV', commandValue);
+        return file_command_1.issueFileCommand('ENV', file_command_1.prepareKeyValueMessage(name, val));
     }
-    else {
-        command_1.issueCommand('set-env', { name }, convertedVal);
-    }
+    command_1.issueCommand('set-env', { name }, convertedVal);
 }
 exports.exportVariable = exportVariable;
 /**
@@ -201,7 +189,7 @@ exports.setSecret = setSecret;
 function addPath(inputPath) {
     const filePath = process.env['GITHUB_PATH'] || '';
     if (filePath) {
-        file_command_1.issueCommand('PATH', inputPath);
+        file_command_1.issueFileCommand('PATH', inputPath);
     }
     else {
         command_1.issueCommand('add-path', {}, inputPath);
@@ -241,7 +229,10 @@ function getMultilineInput(name, options) {
     const inputs = getInput(name, options)
         .split('\n')
         .filter(x => x !== '');
-    return inputs;
+    if (options && options.trimWhitespace === false) {
+        return inputs;
+    }
+    return inputs.map(input => input.trim());
 }
 exports.getMultilineInput = getMultilineInput;
 /**
@@ -274,8 +265,12 @@ exports.getBooleanInput = getBooleanInput;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function setOutput(name, value) {
+    const filePath = process.env['GITHUB_OUTPUT'] || '';
+    if (filePath) {
+        return file_command_1.issueFileCommand('OUTPUT', file_command_1.prepareKeyValueMessage(name, value));
+    }
     process.stdout.write(os.EOL);
-    command_1.issueCommand('set-output', { name }, value);
+    command_1.issueCommand('set-output', { name }, utils_1.toCommandValue(value));
 }
 exports.setOutput = setOutput;
 /**
@@ -404,7 +399,11 @@ exports.group = group;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function saveState(name, value) {
-    command_1.issueCommand('save-state', { name }, value);
+    const filePath = process.env['GITHUB_STATE'] || '';
+    if (filePath) {
+        return file_command_1.issueFileCommand('STATE', file_command_1.prepareKeyValueMessage(name, value));
+    }
+    command_1.issueCommand('save-state', { name }, utils_1.toCommandValue(value));
 }
 exports.saveState = saveState;
 /**
@@ -470,13 +469,14 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.issueCommand = void 0;
+exports.prepareKeyValueMessage = exports.issueFileCommand = void 0;
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const fs = __importStar(__nccwpck_require__(57147));
 const os = __importStar(__nccwpck_require__(22037));
+const uuid_1 = __nccwpck_require__(75840);
 const utils_1 = __nccwpck_require__(5278);
-function issueCommand(command, message) {
+function issueFileCommand(command, message) {
     const filePath = process.env[`GITHUB_${command}`];
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
@@ -488,7 +488,22 @@ function issueCommand(command, message) {
         encoding: 'utf8'
     });
 }
-exports.issueCommand = issueCommand;
+exports.issueFileCommand = issueFileCommand;
+function prepareKeyValueMessage(key, value) {
+    const delimiter = `ghadelimiter_${uuid_1.v4()}`;
+    const convertedValue = utils_1.toCommandValue(value);
+    // These should realistically never happen, but just in case someone finds a
+    // way to exploit uuid generation let's not allow keys or values that contain
+    // the delimiter.
+    if (key.includes(delimiter)) {
+        throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
+    }
+    if (convertedValue.includes(delimiter)) {
+        throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
+    }
+    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+}
+exports.prepareKeyValueMessage = prepareKeyValueMessage;
 //# sourceMappingURL=file-command.js.map
 
 /***/ }),
@@ -1075,8 +1090,9 @@ exports.context = new Context.Context();
  * @param     token    the repo PAT or GITHUB_TOKEN
  * @param     options  other options to set
  */
-function getOctokit(token, options) {
-    return new utils_1.GitHub(utils_1.getOctokitOptions(token, options));
+function getOctokit(token, options, ...additionalPlugins) {
+    const GitHubWithPlugins = utils_1.GitHub.plugin(...additionalPlugins);
+    return new GitHubWithPlugins(utils_1.getOctokitOptions(token, options));
 }
 exports.getOctokit = getOctokit;
 //# sourceMappingURL=github.js.map
@@ -1158,7 +1174,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getOctokitOptions = exports.GitHub = exports.context = void 0;
+exports.getOctokitOptions = exports.GitHub = exports.defaults = exports.context = void 0;
 const Context = __importStar(__nccwpck_require__(74087));
 const Utils = __importStar(__nccwpck_require__(47914));
 // octokit + plugins
@@ -1167,13 +1183,13 @@ const plugin_rest_endpoint_methods_1 = __nccwpck_require__(83044);
 const plugin_paginate_rest_1 = __nccwpck_require__(64193);
 exports.context = new Context.Context();
 const baseUrl = Utils.getApiBaseUrl();
-const defaults = {
+exports.defaults = {
     baseUrl,
     request: {
         agent: Utils.getProxyAgent(baseUrl)
     }
 };
-exports.GitHub = core_1.Octokit.plugin(plugin_rest_endpoint_methods_1.restEndpointMethods, plugin_paginate_rest_1.paginateRest).defaults(defaults);
+exports.GitHub = core_1.Octokit.plugin(plugin_rest_endpoint_methods_1.restEndpointMethods, plugin_paginate_rest_1.paginateRest).defaults(exports.defaults);
 /**
  * Convience function to correctly format Octokit Options to pass into the constructor.
  *
@@ -5239,2803 +5255,6 @@ function encodeRfc3986(value) {
 
 /***/ }),
 
-/***/ 96545:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-module.exports = __nccwpck_require__(52618);
-
-/***/ }),
-
-/***/ 68104:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var settle = __nccwpck_require__(13211);
-var buildFullPath = __nccwpck_require__(41934);
-var buildURL = __nccwpck_require__(30646);
-var http = __nccwpck_require__(13685);
-var https = __nccwpck_require__(95687);
-var httpFollow = (__nccwpck_require__(67707).http);
-var httpsFollow = (__nccwpck_require__(67707).https);
-var url = __nccwpck_require__(57310);
-var zlib = __nccwpck_require__(59796);
-var VERSION = (__nccwpck_require__(94322).version);
-var transitionalDefaults = __nccwpck_require__(40936);
-var AxiosError = __nccwpck_require__(72093);
-var CanceledError = __nccwpck_require__(34098);
-
-var isHttps = /https:?/;
-
-var supportedProtocols = [ 'http:', 'https:', 'file:' ];
-
-/**
- *
- * @param {http.ClientRequestArgs} options
- * @param {AxiosProxyConfig} proxy
- * @param {string} location
- */
-function setProxy(options, proxy, location) {
-  options.hostname = proxy.host;
-  options.host = proxy.host;
-  options.port = proxy.port;
-  options.path = location;
-
-  // Basic proxy authorization
-  if (proxy.auth) {
-    var base64 = Buffer.from(proxy.auth.username + ':' + proxy.auth.password, 'utf8').toString('base64');
-    options.headers['Proxy-Authorization'] = 'Basic ' + base64;
-  }
-
-  // If a proxy is used, any redirects must also pass through the proxy
-  options.beforeRedirect = function beforeRedirect(redirection) {
-    redirection.headers.host = redirection.host;
-    setProxy(redirection, proxy, redirection.href);
-  };
-}
-
-/*eslint consistent-return:0*/
-module.exports = function httpAdapter(config) {
-  return new Promise(function dispatchHttpRequest(resolvePromise, rejectPromise) {
-    var onCanceled;
-    function done() {
-      if (config.cancelToken) {
-        config.cancelToken.unsubscribe(onCanceled);
-      }
-
-      if (config.signal) {
-        config.signal.removeEventListener('abort', onCanceled);
-      }
-    }
-    var resolve = function resolve(value) {
-      done();
-      resolvePromise(value);
-    };
-    var rejected = false;
-    var reject = function reject(value) {
-      done();
-      rejected = true;
-      rejectPromise(value);
-    };
-    var data = config.data;
-    var headers = config.headers;
-    var headerNames = {};
-
-    Object.keys(headers).forEach(function storeLowerName(name) {
-      headerNames[name.toLowerCase()] = name;
-    });
-
-    // Set User-Agent (required by some servers)
-    // See https://github.com/axios/axios/issues/69
-    if ('user-agent' in headerNames) {
-      // User-Agent is specified; handle case where no UA header is desired
-      if (!headers[headerNames['user-agent']]) {
-        delete headers[headerNames['user-agent']];
-      }
-      // Otherwise, use specified value
-    } else {
-      // Only set header if it hasn't been set in config
-      headers['User-Agent'] = 'axios/' + VERSION;
-    }
-
-    // support for https://www.npmjs.com/package/form-data api
-    if (utils.isFormData(data) && utils.isFunction(data.getHeaders)) {
-      Object.assign(headers, data.getHeaders());
-    } else if (data && !utils.isStream(data)) {
-      if (Buffer.isBuffer(data)) {
-        // Nothing to do...
-      } else if (utils.isArrayBuffer(data)) {
-        data = Buffer.from(new Uint8Array(data));
-      } else if (utils.isString(data)) {
-        data = Buffer.from(data, 'utf-8');
-      } else {
-        return reject(new AxiosError(
-          'Data after transformation must be a string, an ArrayBuffer, a Buffer, or a Stream',
-          AxiosError.ERR_BAD_REQUEST,
-          config
-        ));
-      }
-
-      if (config.maxBodyLength > -1 && data.length > config.maxBodyLength) {
-        return reject(new AxiosError(
-          'Request body larger than maxBodyLength limit',
-          AxiosError.ERR_BAD_REQUEST,
-          config
-        ));
-      }
-
-      // Add Content-Length header if data exists
-      if (!headerNames['content-length']) {
-        headers['Content-Length'] = data.length;
-      }
-    }
-
-    // HTTP basic authentication
-    var auth = undefined;
-    if (config.auth) {
-      var username = config.auth.username || '';
-      var password = config.auth.password || '';
-      auth = username + ':' + password;
-    }
-
-    // Parse url
-    var fullPath = buildFullPath(config.baseURL, config.url);
-    var parsed = url.parse(fullPath);
-    var protocol = parsed.protocol || supportedProtocols[0];
-
-    if (supportedProtocols.indexOf(protocol) === -1) {
-      return reject(new AxiosError(
-        'Unsupported protocol ' + protocol,
-        AxiosError.ERR_BAD_REQUEST,
-        config
-      ));
-    }
-
-    if (!auth && parsed.auth) {
-      var urlAuth = parsed.auth.split(':');
-      var urlUsername = urlAuth[0] || '';
-      var urlPassword = urlAuth[1] || '';
-      auth = urlUsername + ':' + urlPassword;
-    }
-
-    if (auth && headerNames.authorization) {
-      delete headers[headerNames.authorization];
-    }
-
-    var isHttpsRequest = isHttps.test(protocol);
-    var agent = isHttpsRequest ? config.httpsAgent : config.httpAgent;
-
-    try {
-      buildURL(parsed.path, config.params, config.paramsSerializer).replace(/^\?/, '');
-    } catch (err) {
-      var customErr = new Error(err.message);
-      customErr.config = config;
-      customErr.url = config.url;
-      customErr.exists = true;
-      reject(customErr);
-    }
-
-    var options = {
-      path: buildURL(parsed.path, config.params, config.paramsSerializer).replace(/^\?/, ''),
-      method: config.method.toUpperCase(),
-      headers: headers,
-      agent: agent,
-      agents: { http: config.httpAgent, https: config.httpsAgent },
-      auth: auth
-    };
-
-    if (config.socketPath) {
-      options.socketPath = config.socketPath;
-    } else {
-      options.hostname = parsed.hostname;
-      options.port = parsed.port;
-    }
-
-    var proxy = config.proxy;
-    if (!proxy && proxy !== false) {
-      var proxyEnv = protocol.slice(0, -1) + '_proxy';
-      var proxyUrl = process.env[proxyEnv] || process.env[proxyEnv.toUpperCase()];
-      if (proxyUrl) {
-        var parsedProxyUrl = url.parse(proxyUrl);
-        var noProxyEnv = process.env.no_proxy || process.env.NO_PROXY;
-        var shouldProxy = true;
-
-        if (noProxyEnv) {
-          var noProxy = noProxyEnv.split(',').map(function trim(s) {
-            return s.trim();
-          });
-
-          shouldProxy = !noProxy.some(function proxyMatch(proxyElement) {
-            if (!proxyElement) {
-              return false;
-            }
-            if (proxyElement === '*') {
-              return true;
-            }
-            if (proxyElement[0] === '.' &&
-                parsed.hostname.substr(parsed.hostname.length - proxyElement.length) === proxyElement) {
-              return true;
-            }
-
-            return parsed.hostname === proxyElement;
-          });
-        }
-
-        if (shouldProxy) {
-          proxy = {
-            host: parsedProxyUrl.hostname,
-            port: parsedProxyUrl.port,
-            protocol: parsedProxyUrl.protocol
-          };
-
-          if (parsedProxyUrl.auth) {
-            var proxyUrlAuth = parsedProxyUrl.auth.split(':');
-            proxy.auth = {
-              username: proxyUrlAuth[0],
-              password: proxyUrlAuth[1]
-            };
-          }
-        }
-      }
-    }
-
-    if (proxy) {
-      options.headers.host = parsed.hostname + (parsed.port ? ':' + parsed.port : '');
-      setProxy(options, proxy, protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path);
-    }
-
-    var transport;
-    var isHttpsProxy = isHttpsRequest && (proxy ? isHttps.test(proxy.protocol) : true);
-    if (config.transport) {
-      transport = config.transport;
-    } else if (config.maxRedirects === 0) {
-      transport = isHttpsProxy ? https : http;
-    } else {
-      if (config.maxRedirects) {
-        options.maxRedirects = config.maxRedirects;
-      }
-      if (config.beforeRedirect) {
-        options.beforeRedirect = config.beforeRedirect;
-      }
-      transport = isHttpsProxy ? httpsFollow : httpFollow;
-    }
-
-    if (config.maxBodyLength > -1) {
-      options.maxBodyLength = config.maxBodyLength;
-    }
-
-    if (config.insecureHTTPParser) {
-      options.insecureHTTPParser = config.insecureHTTPParser;
-    }
-
-    // Create the request
-    var req = transport.request(options, function handleResponse(res) {
-      if (req.aborted) return;
-
-      // uncompress the response body transparently if required
-      var stream = res;
-
-      // return the last request in case of redirects
-      var lastRequest = res.req || req;
-
-
-      // if no content, is HEAD request or decompress disabled we should not decompress
-      if (res.statusCode !== 204 && lastRequest.method !== 'HEAD' && config.decompress !== false) {
-        switch (res.headers['content-encoding']) {
-        /*eslint default-case:0*/
-        case 'gzip':
-        case 'compress':
-        case 'deflate':
-        // add the unzipper to the body stream processing pipeline
-          stream = stream.pipe(zlib.createUnzip());
-
-          // remove the content-encoding in order to not confuse downstream operations
-          delete res.headers['content-encoding'];
-          break;
-        }
-      }
-
-      var response = {
-        status: res.statusCode,
-        statusText: res.statusMessage,
-        headers: res.headers,
-        config: config,
-        request: lastRequest
-      };
-
-      if (config.responseType === 'stream') {
-        response.data = stream;
-        settle(resolve, reject, response);
-      } else {
-        var responseBuffer = [];
-        var totalResponseBytes = 0;
-        stream.on('data', function handleStreamData(chunk) {
-          responseBuffer.push(chunk);
-          totalResponseBytes += chunk.length;
-
-          // make sure the content length is not over the maxContentLength if specified
-          if (config.maxContentLength > -1 && totalResponseBytes > config.maxContentLength) {
-            // stream.destoy() emit aborted event before calling reject() on Node.js v16
-            rejected = true;
-            stream.destroy();
-            reject(new AxiosError('maxContentLength size of ' + config.maxContentLength + ' exceeded',
-              AxiosError.ERR_BAD_RESPONSE, config, lastRequest));
-          }
-        });
-
-        stream.on('aborted', function handlerStreamAborted() {
-          if (rejected) {
-            return;
-          }
-          stream.destroy();
-          reject(new AxiosError(
-            'maxContentLength size of ' + config.maxContentLength + ' exceeded',
-            AxiosError.ERR_BAD_RESPONSE,
-            config,
-            lastRequest
-          ));
-        });
-
-        stream.on('error', function handleStreamError(err) {
-          if (req.aborted) return;
-          reject(AxiosError.from(err, null, config, lastRequest));
-        });
-
-        stream.on('end', function handleStreamEnd() {
-          try {
-            var responseData = responseBuffer.length === 1 ? responseBuffer[0] : Buffer.concat(responseBuffer);
-            if (config.responseType !== 'arraybuffer') {
-              responseData = responseData.toString(config.responseEncoding);
-              if (!config.responseEncoding || config.responseEncoding === 'utf8') {
-                responseData = utils.stripBOM(responseData);
-              }
-            }
-            response.data = responseData;
-          } catch (err) {
-            reject(AxiosError.from(err, null, config, response.request, response));
-          }
-          settle(resolve, reject, response);
-        });
-      }
-    });
-
-    // Handle errors
-    req.on('error', function handleRequestError(err) {
-      // @todo remove
-      // if (req.aborted && err.code !== AxiosError.ERR_FR_TOO_MANY_REDIRECTS) return;
-      reject(AxiosError.from(err, null, config, req));
-    });
-
-    // set tcp keep alive to prevent drop connection by peer
-    req.on('socket', function handleRequestSocket(socket) {
-      // default interval of sending ack packet is 1 minute
-      socket.setKeepAlive(true, 1000 * 60);
-    });
-
-    // Handle request timeout
-    if (config.timeout) {
-      // This is forcing a int timeout to avoid problems if the `req` interface doesn't handle other types.
-      var timeout = parseInt(config.timeout, 10);
-
-      if (isNaN(timeout)) {
-        reject(new AxiosError(
-          'error trying to parse `config.timeout` to int',
-          AxiosError.ERR_BAD_OPTION_VALUE,
-          config,
-          req
-        ));
-
-        return;
-      }
-
-      // Sometime, the response will be very slow, and does not respond, the connect event will be block by event loop system.
-      // And timer callback will be fired, and abort() will be invoked before connection, then get "socket hang up" and code ECONNRESET.
-      // At this time, if we have a large number of request, nodejs will hang up some socket on background. and the number will up and up.
-      // And then these socket which be hang up will devoring CPU little by little.
-      // ClientRequest.setTimeout will be fired on the specify milliseconds, and can make sure that abort() will be fired after connect.
-      req.setTimeout(timeout, function handleRequestTimeout() {
-        req.abort();
-        var transitional = config.transitional || transitionalDefaults;
-        reject(new AxiosError(
-          'timeout of ' + timeout + 'ms exceeded',
-          transitional.clarifyTimeoutError ? AxiosError.ETIMEDOUT : AxiosError.ECONNABORTED,
-          config,
-          req
-        ));
-      });
-    }
-
-    if (config.cancelToken || config.signal) {
-      // Handle cancellation
-      // eslint-disable-next-line func-names
-      onCanceled = function(cancel) {
-        if (req.aborted) return;
-
-        req.abort();
-        reject(!cancel || (cancel && cancel.type) ? new CanceledError() : cancel);
-      };
-
-      config.cancelToken && config.cancelToken.subscribe(onCanceled);
-      if (config.signal) {
-        config.signal.aborted ? onCanceled() : config.signal.addEventListener('abort', onCanceled);
-      }
-    }
-
-
-    // Send the request
-    if (utils.isStream(data)) {
-      data.on('error', function handleStreamError(err) {
-        reject(AxiosError.from(err, config, null, req));
-      }).pipe(req);
-    } else {
-      req.end(data);
-    }
-  });
-};
-
-
-/***/ }),
-
-/***/ 3454:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var settle = __nccwpck_require__(13211);
-var cookies = __nccwpck_require__(21545);
-var buildURL = __nccwpck_require__(30646);
-var buildFullPath = __nccwpck_require__(41934);
-var parseHeaders = __nccwpck_require__(86455);
-var isURLSameOrigin = __nccwpck_require__(33608);
-var transitionalDefaults = __nccwpck_require__(40936);
-var AxiosError = __nccwpck_require__(72093);
-var CanceledError = __nccwpck_require__(34098);
-var parseProtocol = __nccwpck_require__(66107);
-
-module.exports = function xhrAdapter(config) {
-  return new Promise(function dispatchXhrRequest(resolve, reject) {
-    var requestData = config.data;
-    var requestHeaders = config.headers;
-    var responseType = config.responseType;
-    var onCanceled;
-    function done() {
-      if (config.cancelToken) {
-        config.cancelToken.unsubscribe(onCanceled);
-      }
-
-      if (config.signal) {
-        config.signal.removeEventListener('abort', onCanceled);
-      }
-    }
-
-    if (utils.isFormData(requestData) && utils.isStandardBrowserEnv()) {
-      delete requestHeaders['Content-Type']; // Let the browser set it
-    }
-
-    var request = new XMLHttpRequest();
-
-    // HTTP basic authentication
-    if (config.auth) {
-      var username = config.auth.username || '';
-      var password = config.auth.password ? unescape(encodeURIComponent(config.auth.password)) : '';
-      requestHeaders.Authorization = 'Basic ' + btoa(username + ':' + password);
-    }
-
-    var fullPath = buildFullPath(config.baseURL, config.url);
-
-    request.open(config.method.toUpperCase(), buildURL(fullPath, config.params, config.paramsSerializer), true);
-
-    // Set the request timeout in MS
-    request.timeout = config.timeout;
-
-    function onloadend() {
-      if (!request) {
-        return;
-      }
-      // Prepare the response
-      var responseHeaders = 'getAllResponseHeaders' in request ? parseHeaders(request.getAllResponseHeaders()) : null;
-      var responseData = !responseType || responseType === 'text' ||  responseType === 'json' ?
-        request.responseText : request.response;
-      var response = {
-        data: responseData,
-        status: request.status,
-        statusText: request.statusText,
-        headers: responseHeaders,
-        config: config,
-        request: request
-      };
-
-      settle(function _resolve(value) {
-        resolve(value);
-        done();
-      }, function _reject(err) {
-        reject(err);
-        done();
-      }, response);
-
-      // Clean up request
-      request = null;
-    }
-
-    if ('onloadend' in request) {
-      // Use onloadend if available
-      request.onloadend = onloadend;
-    } else {
-      // Listen for ready state to emulate onloadend
-      request.onreadystatechange = function handleLoad() {
-        if (!request || request.readyState !== 4) {
-          return;
-        }
-
-        // The request errored out and we didn't get a response, this will be
-        // handled by onerror instead
-        // With one exception: request that using file: protocol, most browsers
-        // will return status as 0 even though it's a successful request
-        if (request.status === 0 && !(request.responseURL && request.responseURL.indexOf('file:') === 0)) {
-          return;
-        }
-        // readystate handler is calling before onerror or ontimeout handlers,
-        // so we should call onloadend on the next 'tick'
-        setTimeout(onloadend);
-      };
-    }
-
-    // Handle browser request cancellation (as opposed to a manual cancellation)
-    request.onabort = function handleAbort() {
-      if (!request) {
-        return;
-      }
-
-      reject(new AxiosError('Request aborted', AxiosError.ECONNABORTED, config, request));
-
-      // Clean up request
-      request = null;
-    };
-
-    // Handle low level network errors
-    request.onerror = function handleError() {
-      // Real errors are hidden from us by the browser
-      // onerror should only fire if it's a network error
-      reject(new AxiosError('Network Error', AxiosError.ERR_NETWORK, config, request, request));
-
-      // Clean up request
-      request = null;
-    };
-
-    // Handle timeout
-    request.ontimeout = function handleTimeout() {
-      var timeoutErrorMessage = config.timeout ? 'timeout of ' + config.timeout + 'ms exceeded' : 'timeout exceeded';
-      var transitional = config.transitional || transitionalDefaults;
-      if (config.timeoutErrorMessage) {
-        timeoutErrorMessage = config.timeoutErrorMessage;
-      }
-      reject(new AxiosError(
-        timeoutErrorMessage,
-        transitional.clarifyTimeoutError ? AxiosError.ETIMEDOUT : AxiosError.ECONNABORTED,
-        config,
-        request));
-
-      // Clean up request
-      request = null;
-    };
-
-    // Add xsrf header
-    // This is only done if running in a standard browser environment.
-    // Specifically not if we're in a web worker, or react-native.
-    if (utils.isStandardBrowserEnv()) {
-      // Add xsrf header
-      var xsrfValue = (config.withCredentials || isURLSameOrigin(fullPath)) && config.xsrfCookieName ?
-        cookies.read(config.xsrfCookieName) :
-        undefined;
-
-      if (xsrfValue) {
-        requestHeaders[config.xsrfHeaderName] = xsrfValue;
-      }
-    }
-
-    // Add headers to the request
-    if ('setRequestHeader' in request) {
-      utils.forEach(requestHeaders, function setRequestHeader(val, key) {
-        if (typeof requestData === 'undefined' && key.toLowerCase() === 'content-type') {
-          // Remove Content-Type if data is undefined
-          delete requestHeaders[key];
-        } else {
-          // Otherwise add header to the request
-          request.setRequestHeader(key, val);
-        }
-      });
-    }
-
-    // Add withCredentials to request if needed
-    if (!utils.isUndefined(config.withCredentials)) {
-      request.withCredentials = !!config.withCredentials;
-    }
-
-    // Add responseType to request if needed
-    if (responseType && responseType !== 'json') {
-      request.responseType = config.responseType;
-    }
-
-    // Handle progress if needed
-    if (typeof config.onDownloadProgress === 'function') {
-      request.addEventListener('progress', config.onDownloadProgress);
-    }
-
-    // Not all browsers support upload events
-    if (typeof config.onUploadProgress === 'function' && request.upload) {
-      request.upload.addEventListener('progress', config.onUploadProgress);
-    }
-
-    if (config.cancelToken || config.signal) {
-      // Handle cancellation
-      // eslint-disable-next-line func-names
-      onCanceled = function(cancel) {
-        if (!request) {
-          return;
-        }
-        reject(!cancel || (cancel && cancel.type) ? new CanceledError() : cancel);
-        request.abort();
-        request = null;
-      };
-
-      config.cancelToken && config.cancelToken.subscribe(onCanceled);
-      if (config.signal) {
-        config.signal.aborted ? onCanceled() : config.signal.addEventListener('abort', onCanceled);
-      }
-    }
-
-    if (!requestData) {
-      requestData = null;
-    }
-
-    var protocol = parseProtocol(fullPath);
-
-    if (protocol && [ 'http', 'https', 'file' ].indexOf(protocol) === -1) {
-      reject(new AxiosError('Unsupported protocol ' + protocol + ':', AxiosError.ERR_BAD_REQUEST, config));
-      return;
-    }
-
-
-    // Send the request
-    request.send(requestData);
-  });
-};
-
-
-/***/ }),
-
-/***/ 52618:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var bind = __nccwpck_require__(77065);
-var Axios = __nccwpck_require__(98178);
-var mergeConfig = __nccwpck_require__(74831);
-var defaults = __nccwpck_require__(21626);
-
-/**
- * Create an instance of Axios
- *
- * @param {Object} defaultConfig The default config for the instance
- * @return {Axios} A new instance of Axios
- */
-function createInstance(defaultConfig) {
-  var context = new Axios(defaultConfig);
-  var instance = bind(Axios.prototype.request, context);
-
-  // Copy axios.prototype to instance
-  utils.extend(instance, Axios.prototype, context);
-
-  // Copy context to instance
-  utils.extend(instance, context);
-
-  // Factory for creating new instances
-  instance.create = function create(instanceConfig) {
-    return createInstance(mergeConfig(defaultConfig, instanceConfig));
-  };
-
-  return instance;
-}
-
-// Create the default instance to be exported
-var axios = createInstance(defaults);
-
-// Expose Axios class to allow class inheritance
-axios.Axios = Axios;
-
-// Expose Cancel & CancelToken
-axios.CanceledError = __nccwpck_require__(34098);
-axios.CancelToken = __nccwpck_require__(71587);
-axios.isCancel = __nccwpck_require__(64057);
-axios.VERSION = (__nccwpck_require__(94322).version);
-axios.toFormData = __nccwpck_require__(20470);
-
-// Expose AxiosError class
-axios.AxiosError = __nccwpck_require__(72093);
-
-// alias for CanceledError for backward compatibility
-axios.Cancel = axios.CanceledError;
-
-// Expose all/spread
-axios.all = function all(promises) {
-  return Promise.all(promises);
-};
-axios.spread = __nccwpck_require__(74850);
-
-// Expose isAxiosError
-axios.isAxiosError = __nccwpck_require__(60650);
-
-module.exports = axios;
-
-// Allow use of default import syntax in TypeScript
-module.exports["default"] = axios;
-
-
-/***/ }),
-
-/***/ 71587:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var CanceledError = __nccwpck_require__(34098);
-
-/**
- * A `CancelToken` is an object that can be used to request cancellation of an operation.
- *
- * @class
- * @param {Function} executor The executor function.
- */
-function CancelToken(executor) {
-  if (typeof executor !== 'function') {
-    throw new TypeError('executor must be a function.');
-  }
-
-  var resolvePromise;
-
-  this.promise = new Promise(function promiseExecutor(resolve) {
-    resolvePromise = resolve;
-  });
-
-  var token = this;
-
-  // eslint-disable-next-line func-names
-  this.promise.then(function(cancel) {
-    if (!token._listeners) return;
-
-    var i;
-    var l = token._listeners.length;
-
-    for (i = 0; i < l; i++) {
-      token._listeners[i](cancel);
-    }
-    token._listeners = null;
-  });
-
-  // eslint-disable-next-line func-names
-  this.promise.then = function(onfulfilled) {
-    var _resolve;
-    // eslint-disable-next-line func-names
-    var promise = new Promise(function(resolve) {
-      token.subscribe(resolve);
-      _resolve = resolve;
-    }).then(onfulfilled);
-
-    promise.cancel = function reject() {
-      token.unsubscribe(_resolve);
-    };
-
-    return promise;
-  };
-
-  executor(function cancel(message) {
-    if (token.reason) {
-      // Cancellation has already been requested
-      return;
-    }
-
-    token.reason = new CanceledError(message);
-    resolvePromise(token.reason);
-  });
-}
-
-/**
- * Throws a `CanceledError` if cancellation has been requested.
- */
-CancelToken.prototype.throwIfRequested = function throwIfRequested() {
-  if (this.reason) {
-    throw this.reason;
-  }
-};
-
-/**
- * Subscribe to the cancel signal
- */
-
-CancelToken.prototype.subscribe = function subscribe(listener) {
-  if (this.reason) {
-    listener(this.reason);
-    return;
-  }
-
-  if (this._listeners) {
-    this._listeners.push(listener);
-  } else {
-    this._listeners = [listener];
-  }
-};
-
-/**
- * Unsubscribe from the cancel signal
- */
-
-CancelToken.prototype.unsubscribe = function unsubscribe(listener) {
-  if (!this._listeners) {
-    return;
-  }
-  var index = this._listeners.indexOf(listener);
-  if (index !== -1) {
-    this._listeners.splice(index, 1);
-  }
-};
-
-/**
- * Returns an object that contains a new `CancelToken` and a function that, when called,
- * cancels the `CancelToken`.
- */
-CancelToken.source = function source() {
-  var cancel;
-  var token = new CancelToken(function executor(c) {
-    cancel = c;
-  });
-  return {
-    token: token,
-    cancel: cancel
-  };
-};
-
-module.exports = CancelToken;
-
-
-/***/ }),
-
-/***/ 34098:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var AxiosError = __nccwpck_require__(72093);
-var utils = __nccwpck_require__(20328);
-
-/**
- * A `CanceledError` is an object that is thrown when an operation is canceled.
- *
- * @class
- * @param {string=} message The message.
- */
-function CanceledError(message) {
-  // eslint-disable-next-line no-eq-null,eqeqeq
-  AxiosError.call(this, message == null ? 'canceled' : message, AxiosError.ERR_CANCELED);
-  this.name = 'CanceledError';
-}
-
-utils.inherits(CanceledError, AxiosError, {
-  __CANCEL__: true
-});
-
-module.exports = CanceledError;
-
-
-/***/ }),
-
-/***/ 64057:
-/***/ ((module) => {
-
-"use strict";
-
-
-module.exports = function isCancel(value) {
-  return !!(value && value.__CANCEL__);
-};
-
-
-/***/ }),
-
-/***/ 98178:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var buildURL = __nccwpck_require__(30646);
-var InterceptorManager = __nccwpck_require__(3214);
-var dispatchRequest = __nccwpck_require__(85062);
-var mergeConfig = __nccwpck_require__(74831);
-var buildFullPath = __nccwpck_require__(41934);
-var validator = __nccwpck_require__(51632);
-
-var validators = validator.validators;
-/**
- * Create a new instance of Axios
- *
- * @param {Object} instanceConfig The default config for the instance
- */
-function Axios(instanceConfig) {
-  this.defaults = instanceConfig;
-  this.interceptors = {
-    request: new InterceptorManager(),
-    response: new InterceptorManager()
-  };
-}
-
-/**
- * Dispatch a request
- *
- * @param {Object} config The config specific for this request (merged with this.defaults)
- */
-Axios.prototype.request = function request(configOrUrl, config) {
-  /*eslint no-param-reassign:0*/
-  // Allow for axios('example/url'[, config]) a la fetch API
-  if (typeof configOrUrl === 'string') {
-    config = config || {};
-    config.url = configOrUrl;
-  } else {
-    config = configOrUrl || {};
-  }
-
-  config = mergeConfig(this.defaults, config);
-
-  // Set config.method
-  if (config.method) {
-    config.method = config.method.toLowerCase();
-  } else if (this.defaults.method) {
-    config.method = this.defaults.method.toLowerCase();
-  } else {
-    config.method = 'get';
-  }
-
-  var transitional = config.transitional;
-
-  if (transitional !== undefined) {
-    validator.assertOptions(transitional, {
-      silentJSONParsing: validators.transitional(validators.boolean),
-      forcedJSONParsing: validators.transitional(validators.boolean),
-      clarifyTimeoutError: validators.transitional(validators.boolean)
-    }, false);
-  }
-
-  // filter out skipped interceptors
-  var requestInterceptorChain = [];
-  var synchronousRequestInterceptors = true;
-  this.interceptors.request.forEach(function unshiftRequestInterceptors(interceptor) {
-    if (typeof interceptor.runWhen === 'function' && interceptor.runWhen(config) === false) {
-      return;
-    }
-
-    synchronousRequestInterceptors = synchronousRequestInterceptors && interceptor.synchronous;
-
-    requestInterceptorChain.unshift(interceptor.fulfilled, interceptor.rejected);
-  });
-
-  var responseInterceptorChain = [];
-  this.interceptors.response.forEach(function pushResponseInterceptors(interceptor) {
-    responseInterceptorChain.push(interceptor.fulfilled, interceptor.rejected);
-  });
-
-  var promise;
-
-  if (!synchronousRequestInterceptors) {
-    var chain = [dispatchRequest, undefined];
-
-    Array.prototype.unshift.apply(chain, requestInterceptorChain);
-    chain = chain.concat(responseInterceptorChain);
-
-    promise = Promise.resolve(config);
-    while (chain.length) {
-      promise = promise.then(chain.shift(), chain.shift());
-    }
-
-    return promise;
-  }
-
-
-  var newConfig = config;
-  while (requestInterceptorChain.length) {
-    var onFulfilled = requestInterceptorChain.shift();
-    var onRejected = requestInterceptorChain.shift();
-    try {
-      newConfig = onFulfilled(newConfig);
-    } catch (error) {
-      onRejected(error);
-      break;
-    }
-  }
-
-  try {
-    promise = dispatchRequest(newConfig);
-  } catch (error) {
-    return Promise.reject(error);
-  }
-
-  while (responseInterceptorChain.length) {
-    promise = promise.then(responseInterceptorChain.shift(), responseInterceptorChain.shift());
-  }
-
-  return promise;
-};
-
-Axios.prototype.getUri = function getUri(config) {
-  config = mergeConfig(this.defaults, config);
-  var fullPath = buildFullPath(config.baseURL, config.url);
-  return buildURL(fullPath, config.params, config.paramsSerializer);
-};
-
-// Provide aliases for supported request methods
-utils.forEach(['delete', 'get', 'head', 'options'], function forEachMethodNoData(method) {
-  /*eslint func-names:0*/
-  Axios.prototype[method] = function(url, config) {
-    return this.request(mergeConfig(config || {}, {
-      method: method,
-      url: url,
-      data: (config || {}).data
-    }));
-  };
-});
-
-utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
-  /*eslint func-names:0*/
-
-  function generateHTTPMethod(isForm) {
-    return function httpMethod(url, data, config) {
-      return this.request(mergeConfig(config || {}, {
-        method: method,
-        headers: isForm ? {
-          'Content-Type': 'multipart/form-data'
-        } : {},
-        url: url,
-        data: data
-      }));
-    };
-  }
-
-  Axios.prototype[method] = generateHTTPMethod();
-
-  Axios.prototype[method + 'Form'] = generateHTTPMethod(true);
-});
-
-module.exports = Axios;
-
-
-/***/ }),
-
-/***/ 72093:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-/**
- * Create an Error with the specified message, config, error code, request and response.
- *
- * @param {string} message The error message.
- * @param {string} [code] The error code (for example, 'ECONNABORTED').
- * @param {Object} [config] The config.
- * @param {Object} [request] The request.
- * @param {Object} [response] The response.
- * @returns {Error} The created error.
- */
-function AxiosError(message, code, config, request, response) {
-  Error.call(this);
-  this.message = message;
-  this.name = 'AxiosError';
-  code && (this.code = code);
-  config && (this.config = config);
-  request && (this.request = request);
-  response && (this.response = response);
-}
-
-utils.inherits(AxiosError, Error, {
-  toJSON: function toJSON() {
-    return {
-      // Standard
-      message: this.message,
-      name: this.name,
-      // Microsoft
-      description: this.description,
-      number: this.number,
-      // Mozilla
-      fileName: this.fileName,
-      lineNumber: this.lineNumber,
-      columnNumber: this.columnNumber,
-      stack: this.stack,
-      // Axios
-      config: this.config,
-      code: this.code,
-      status: this.response && this.response.status ? this.response.status : null
-    };
-  }
-});
-
-var prototype = AxiosError.prototype;
-var descriptors = {};
-
-[
-  'ERR_BAD_OPTION_VALUE',
-  'ERR_BAD_OPTION',
-  'ECONNABORTED',
-  'ETIMEDOUT',
-  'ERR_NETWORK',
-  'ERR_FR_TOO_MANY_REDIRECTS',
-  'ERR_DEPRECATED',
-  'ERR_BAD_RESPONSE',
-  'ERR_BAD_REQUEST',
-  'ERR_CANCELED'
-// eslint-disable-next-line func-names
-].forEach(function(code) {
-  descriptors[code] = {value: code};
-});
-
-Object.defineProperties(AxiosError, descriptors);
-Object.defineProperty(prototype, 'isAxiosError', {value: true});
-
-// eslint-disable-next-line func-names
-AxiosError.from = function(error, code, config, request, response, customProps) {
-  var axiosError = Object.create(prototype);
-
-  utils.toFlatObject(error, axiosError, function filter(obj) {
-    return obj !== Error.prototype;
-  });
-
-  AxiosError.call(axiosError, error.message, code, config, request, response);
-
-  axiosError.name = error.name;
-
-  customProps && Object.assign(axiosError, customProps);
-
-  return axiosError;
-};
-
-module.exports = AxiosError;
-
-
-/***/ }),
-
-/***/ 3214:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-function InterceptorManager() {
-  this.handlers = [];
-}
-
-/**
- * Add a new interceptor to the stack
- *
- * @param {Function} fulfilled The function to handle `then` for a `Promise`
- * @param {Function} rejected The function to handle `reject` for a `Promise`
- *
- * @return {Number} An ID used to remove interceptor later
- */
-InterceptorManager.prototype.use = function use(fulfilled, rejected, options) {
-  this.handlers.push({
-    fulfilled: fulfilled,
-    rejected: rejected,
-    synchronous: options ? options.synchronous : false,
-    runWhen: options ? options.runWhen : null
-  });
-  return this.handlers.length - 1;
-};
-
-/**
- * Remove an interceptor from the stack
- *
- * @param {Number} id The ID that was returned by `use`
- */
-InterceptorManager.prototype.eject = function eject(id) {
-  if (this.handlers[id]) {
-    this.handlers[id] = null;
-  }
-};
-
-/**
- * Iterate over all the registered interceptors
- *
- * This method is particularly useful for skipping over any
- * interceptors that may have become `null` calling `eject`.
- *
- * @param {Function} fn The function to call for each interceptor
- */
-InterceptorManager.prototype.forEach = function forEach(fn) {
-  utils.forEach(this.handlers, function forEachHandler(h) {
-    if (h !== null) {
-      fn(h);
-    }
-  });
-};
-
-module.exports = InterceptorManager;
-
-
-/***/ }),
-
-/***/ 41934:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var isAbsoluteURL = __nccwpck_require__(41301);
-var combineURLs = __nccwpck_require__(57189);
-
-/**
- * Creates a new URL by combining the baseURL with the requestedURL,
- * only when the requestedURL is not already an absolute URL.
- * If the requestURL is absolute, this function returns the requestedURL untouched.
- *
- * @param {string} baseURL The base URL
- * @param {string} requestedURL Absolute or relative URL to combine
- * @returns {string} The combined full path
- */
-module.exports = function buildFullPath(baseURL, requestedURL) {
-  if (baseURL && !isAbsoluteURL(requestedURL)) {
-    return combineURLs(baseURL, requestedURL);
-  }
-  return requestedURL;
-};
-
-
-/***/ }),
-
-/***/ 85062:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var transformData = __nccwpck_require__(19812);
-var isCancel = __nccwpck_require__(64057);
-var defaults = __nccwpck_require__(21626);
-var CanceledError = __nccwpck_require__(34098);
-
-/**
- * Throws a `CanceledError` if cancellation has been requested.
- */
-function throwIfCancellationRequested(config) {
-  if (config.cancelToken) {
-    config.cancelToken.throwIfRequested();
-  }
-
-  if (config.signal && config.signal.aborted) {
-    throw new CanceledError();
-  }
-}
-
-/**
- * Dispatch a request to the server using the configured adapter.
- *
- * @param {object} config The config that is to be used for the request
- * @returns {Promise} The Promise to be fulfilled
- */
-module.exports = function dispatchRequest(config) {
-  throwIfCancellationRequested(config);
-
-  // Ensure headers exist
-  config.headers = config.headers || {};
-
-  // Transform request data
-  config.data = transformData.call(
-    config,
-    config.data,
-    config.headers,
-    config.transformRequest
-  );
-
-  // Flatten headers
-  config.headers = utils.merge(
-    config.headers.common || {},
-    config.headers[config.method] || {},
-    config.headers
-  );
-
-  utils.forEach(
-    ['delete', 'get', 'head', 'post', 'put', 'patch', 'common'],
-    function cleanHeaderConfig(method) {
-      delete config.headers[method];
-    }
-  );
-
-  var adapter = config.adapter || defaults.adapter;
-
-  return adapter(config).then(function onAdapterResolution(response) {
-    throwIfCancellationRequested(config);
-
-    // Transform response data
-    response.data = transformData.call(
-      config,
-      response.data,
-      response.headers,
-      config.transformResponse
-    );
-
-    return response;
-  }, function onAdapterRejection(reason) {
-    if (!isCancel(reason)) {
-      throwIfCancellationRequested(config);
-
-      // Transform response data
-      if (reason && reason.response) {
-        reason.response.data = transformData.call(
-          config,
-          reason.response.data,
-          reason.response.headers,
-          config.transformResponse
-        );
-      }
-    }
-
-    return Promise.reject(reason);
-  });
-};
-
-
-/***/ }),
-
-/***/ 74831:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-/**
- * Config-specific merge-function which creates a new config-object
- * by merging two configuration objects together.
- *
- * @param {Object} config1
- * @param {Object} config2
- * @returns {Object} New object resulting from merging config2 to config1
- */
-module.exports = function mergeConfig(config1, config2) {
-  // eslint-disable-next-line no-param-reassign
-  config2 = config2 || {};
-  var config = {};
-
-  function getMergedValue(target, source) {
-    if (utils.isPlainObject(target) && utils.isPlainObject(source)) {
-      return utils.merge(target, source);
-    } else if (utils.isPlainObject(source)) {
-      return utils.merge({}, source);
-    } else if (utils.isArray(source)) {
-      return source.slice();
-    }
-    return source;
-  }
-
-  // eslint-disable-next-line consistent-return
-  function mergeDeepProperties(prop) {
-    if (!utils.isUndefined(config2[prop])) {
-      return getMergedValue(config1[prop], config2[prop]);
-    } else if (!utils.isUndefined(config1[prop])) {
-      return getMergedValue(undefined, config1[prop]);
-    }
-  }
-
-  // eslint-disable-next-line consistent-return
-  function valueFromConfig2(prop) {
-    if (!utils.isUndefined(config2[prop])) {
-      return getMergedValue(undefined, config2[prop]);
-    }
-  }
-
-  // eslint-disable-next-line consistent-return
-  function defaultToConfig2(prop) {
-    if (!utils.isUndefined(config2[prop])) {
-      return getMergedValue(undefined, config2[prop]);
-    } else if (!utils.isUndefined(config1[prop])) {
-      return getMergedValue(undefined, config1[prop]);
-    }
-  }
-
-  // eslint-disable-next-line consistent-return
-  function mergeDirectKeys(prop) {
-    if (prop in config2) {
-      return getMergedValue(config1[prop], config2[prop]);
-    } else if (prop in config1) {
-      return getMergedValue(undefined, config1[prop]);
-    }
-  }
-
-  var mergeMap = {
-    'url': valueFromConfig2,
-    'method': valueFromConfig2,
-    'data': valueFromConfig2,
-    'baseURL': defaultToConfig2,
-    'transformRequest': defaultToConfig2,
-    'transformResponse': defaultToConfig2,
-    'paramsSerializer': defaultToConfig2,
-    'timeout': defaultToConfig2,
-    'timeoutMessage': defaultToConfig2,
-    'withCredentials': defaultToConfig2,
-    'adapter': defaultToConfig2,
-    'responseType': defaultToConfig2,
-    'xsrfCookieName': defaultToConfig2,
-    'xsrfHeaderName': defaultToConfig2,
-    'onUploadProgress': defaultToConfig2,
-    'onDownloadProgress': defaultToConfig2,
-    'decompress': defaultToConfig2,
-    'maxContentLength': defaultToConfig2,
-    'maxBodyLength': defaultToConfig2,
-    'beforeRedirect': defaultToConfig2,
-    'transport': defaultToConfig2,
-    'httpAgent': defaultToConfig2,
-    'httpsAgent': defaultToConfig2,
-    'cancelToken': defaultToConfig2,
-    'socketPath': defaultToConfig2,
-    'responseEncoding': defaultToConfig2,
-    'validateStatus': mergeDirectKeys
-  };
-
-  utils.forEach(Object.keys(config1).concat(Object.keys(config2)), function computeConfigValue(prop) {
-    var merge = mergeMap[prop] || mergeDeepProperties;
-    var configValue = merge(prop);
-    (utils.isUndefined(configValue) && merge !== mergeDirectKeys) || (config[prop] = configValue);
-  });
-
-  return config;
-};
-
-
-/***/ }),
-
-/***/ 13211:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var AxiosError = __nccwpck_require__(72093);
-
-/**
- * Resolve or reject a Promise based on response status.
- *
- * @param {Function} resolve A function that resolves the promise.
- * @param {Function} reject A function that rejects the promise.
- * @param {object} response The response.
- */
-module.exports = function settle(resolve, reject, response) {
-  var validateStatus = response.config.validateStatus;
-  if (!response.status || !validateStatus || validateStatus(response.status)) {
-    resolve(response);
-  } else {
-    reject(new AxiosError(
-      'Request failed with status code ' + response.status,
-      [AxiosError.ERR_BAD_REQUEST, AxiosError.ERR_BAD_RESPONSE][Math.floor(response.status / 100) - 4],
-      response.config,
-      response.request,
-      response
-    ));
-  }
-};
-
-
-/***/ }),
-
-/***/ 19812:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var defaults = __nccwpck_require__(21626);
-
-/**
- * Transform the data for a request or a response
- *
- * @param {Object|String} data The data to be transformed
- * @param {Array} headers The headers for the request or response
- * @param {Array|Function} fns A single function or Array of functions
- * @returns {*} The resulting transformed data
- */
-module.exports = function transformData(data, headers, fns) {
-  var context = this || defaults;
-  /*eslint no-param-reassign:0*/
-  utils.forEach(fns, function transform(fn) {
-    data = fn.call(context, data, headers);
-  });
-
-  return data;
-};
-
-
-/***/ }),
-
-/***/ 17024:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-// eslint-disable-next-line strict
-module.exports = __nccwpck_require__(64334);
-
-
-/***/ }),
-
-/***/ 21626:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-var normalizeHeaderName = __nccwpck_require__(36240);
-var AxiosError = __nccwpck_require__(72093);
-var transitionalDefaults = __nccwpck_require__(40936);
-var toFormData = __nccwpck_require__(20470);
-
-var DEFAULT_CONTENT_TYPE = {
-  'Content-Type': 'application/x-www-form-urlencoded'
-};
-
-function setContentTypeIfUnset(headers, value) {
-  if (!utils.isUndefined(headers) && utils.isUndefined(headers['Content-Type'])) {
-    headers['Content-Type'] = value;
-  }
-}
-
-function getDefaultAdapter() {
-  var adapter;
-  if (typeof XMLHttpRequest !== 'undefined') {
-    // For browsers use XHR adapter
-    adapter = __nccwpck_require__(3454);
-  } else if (typeof process !== 'undefined' && Object.prototype.toString.call(process) === '[object process]') {
-    // For node use HTTP adapter
-    adapter = __nccwpck_require__(68104);
-  }
-  return adapter;
-}
-
-function stringifySafely(rawValue, parser, encoder) {
-  if (utils.isString(rawValue)) {
-    try {
-      (parser || JSON.parse)(rawValue);
-      return utils.trim(rawValue);
-    } catch (e) {
-      if (e.name !== 'SyntaxError') {
-        throw e;
-      }
-    }
-  }
-
-  return (encoder || JSON.stringify)(rawValue);
-}
-
-var defaults = {
-
-  transitional: transitionalDefaults,
-
-  adapter: getDefaultAdapter(),
-
-  transformRequest: [function transformRequest(data, headers) {
-    normalizeHeaderName(headers, 'Accept');
-    normalizeHeaderName(headers, 'Content-Type');
-
-    if (utils.isFormData(data) ||
-      utils.isArrayBuffer(data) ||
-      utils.isBuffer(data) ||
-      utils.isStream(data) ||
-      utils.isFile(data) ||
-      utils.isBlob(data)
-    ) {
-      return data;
-    }
-    if (utils.isArrayBufferView(data)) {
-      return data.buffer;
-    }
-    if (utils.isURLSearchParams(data)) {
-      setContentTypeIfUnset(headers, 'application/x-www-form-urlencoded;charset=utf-8');
-      return data.toString();
-    }
-
-    var isObjectPayload = utils.isObject(data);
-    var contentType = headers && headers['Content-Type'];
-
-    var isFileList;
-
-    if ((isFileList = utils.isFileList(data)) || (isObjectPayload && contentType === 'multipart/form-data')) {
-      var _FormData = this.env && this.env.FormData;
-      return toFormData(isFileList ? {'files[]': data} : data, _FormData && new _FormData());
-    } else if (isObjectPayload || contentType === 'application/json') {
-      setContentTypeIfUnset(headers, 'application/json');
-      return stringifySafely(data);
-    }
-
-    return data;
-  }],
-
-  transformResponse: [function transformResponse(data) {
-    var transitional = this.transitional || defaults.transitional;
-    var silentJSONParsing = transitional && transitional.silentJSONParsing;
-    var forcedJSONParsing = transitional && transitional.forcedJSONParsing;
-    var strictJSONParsing = !silentJSONParsing && this.responseType === 'json';
-
-    if (strictJSONParsing || (forcedJSONParsing && utils.isString(data) && data.length)) {
-      try {
-        return JSON.parse(data);
-      } catch (e) {
-        if (strictJSONParsing) {
-          if (e.name === 'SyntaxError') {
-            throw AxiosError.from(e, AxiosError.ERR_BAD_RESPONSE, this, null, this.response);
-          }
-          throw e;
-        }
-      }
-    }
-
-    return data;
-  }],
-
-  /**
-   * A timeout in milliseconds to abort a request. If set to 0 (default) a
-   * timeout is not created.
-   */
-  timeout: 0,
-
-  xsrfCookieName: 'XSRF-TOKEN',
-  xsrfHeaderName: 'X-XSRF-TOKEN',
-
-  maxContentLength: -1,
-  maxBodyLength: -1,
-
-  env: {
-    FormData: __nccwpck_require__(17024)
-  },
-
-  validateStatus: function validateStatus(status) {
-    return status >= 200 && status < 300;
-  },
-
-  headers: {
-    common: {
-      'Accept': 'application/json, text/plain, */*'
-    }
-  }
-};
-
-utils.forEach(['delete', 'get', 'head'], function forEachMethodNoData(method) {
-  defaults.headers[method] = {};
-});
-
-utils.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
-  defaults.headers[method] = utils.merge(DEFAULT_CONTENT_TYPE);
-});
-
-module.exports = defaults;
-
-
-/***/ }),
-
-/***/ 40936:
-/***/ ((module) => {
-
-"use strict";
-
-
-module.exports = {
-  silentJSONParsing: true,
-  forcedJSONParsing: true,
-  clarifyTimeoutError: false
-};
-
-
-/***/ }),
-
-/***/ 94322:
-/***/ ((module) => {
-
-module.exports = {
-  "version": "0.27.2"
-};
-
-/***/ }),
-
-/***/ 77065:
-/***/ ((module) => {
-
-"use strict";
-
-
-module.exports = function bind(fn, thisArg) {
-  return function wrap() {
-    var args = new Array(arguments.length);
-    for (var i = 0; i < args.length; i++) {
-      args[i] = arguments[i];
-    }
-    return fn.apply(thisArg, args);
-  };
-};
-
-
-/***/ }),
-
-/***/ 30646:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-function encode(val) {
-  return encodeURIComponent(val).
-    replace(/%3A/gi, ':').
-    replace(/%24/g, '$').
-    replace(/%2C/gi, ',').
-    replace(/%20/g, '+').
-    replace(/%5B/gi, '[').
-    replace(/%5D/gi, ']');
-}
-
-/**
- * Build a URL by appending params to the end
- *
- * @param {string} url The base of the url (e.g., http://www.google.com)
- * @param {object} [params] The params to be appended
- * @returns {string} The formatted url
- */
-module.exports = function buildURL(url, params, paramsSerializer) {
-  /*eslint no-param-reassign:0*/
-  if (!params) {
-    return url;
-  }
-
-  var serializedParams;
-  if (paramsSerializer) {
-    serializedParams = paramsSerializer(params);
-  } else if (utils.isURLSearchParams(params)) {
-    serializedParams = params.toString();
-  } else {
-    var parts = [];
-
-    utils.forEach(params, function serialize(val, key) {
-      if (val === null || typeof val === 'undefined') {
-        return;
-      }
-
-      if (utils.isArray(val)) {
-        key = key + '[]';
-      } else {
-        val = [val];
-      }
-
-      utils.forEach(val, function parseValue(v) {
-        if (utils.isDate(v)) {
-          v = v.toISOString();
-        } else if (utils.isObject(v)) {
-          v = JSON.stringify(v);
-        }
-        parts.push(encode(key) + '=' + encode(v));
-      });
-    });
-
-    serializedParams = parts.join('&');
-  }
-
-  if (serializedParams) {
-    var hashmarkIndex = url.indexOf('#');
-    if (hashmarkIndex !== -1) {
-      url = url.slice(0, hashmarkIndex);
-    }
-
-    url += (url.indexOf('?') === -1 ? '?' : '&') + serializedParams;
-  }
-
-  return url;
-};
-
-
-/***/ }),
-
-/***/ 57189:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Creates a new URL by combining the specified URLs
- *
- * @param {string} baseURL The base URL
- * @param {string} relativeURL The relative URL
- * @returns {string} The combined URL
- */
-module.exports = function combineURLs(baseURL, relativeURL) {
-  return relativeURL
-    ? baseURL.replace(/\/+$/, '') + '/' + relativeURL.replace(/^\/+/, '')
-    : baseURL;
-};
-
-
-/***/ }),
-
-/***/ 21545:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-module.exports = (
-  utils.isStandardBrowserEnv() ?
-
-  // Standard browser envs support document.cookie
-    (function standardBrowserEnv() {
-      return {
-        write: function write(name, value, expires, path, domain, secure) {
-          var cookie = [];
-          cookie.push(name + '=' + encodeURIComponent(value));
-
-          if (utils.isNumber(expires)) {
-            cookie.push('expires=' + new Date(expires).toGMTString());
-          }
-
-          if (utils.isString(path)) {
-            cookie.push('path=' + path);
-          }
-
-          if (utils.isString(domain)) {
-            cookie.push('domain=' + domain);
-          }
-
-          if (secure === true) {
-            cookie.push('secure');
-          }
-
-          document.cookie = cookie.join('; ');
-        },
-
-        read: function read(name) {
-          var match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
-          return (match ? decodeURIComponent(match[3]) : null);
-        },
-
-        remove: function remove(name) {
-          this.write(name, '', Date.now() - 86400000);
-        }
-      };
-    })() :
-
-  // Non standard browser env (web workers, react-native) lack needed support.
-    (function nonStandardBrowserEnv() {
-      return {
-        write: function write() {},
-        read: function read() { return null; },
-        remove: function remove() {}
-      };
-    })()
-);
-
-
-/***/ }),
-
-/***/ 41301:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Determines whether the specified URL is absolute
- *
- * @param {string} url The URL to test
- * @returns {boolean} True if the specified URL is absolute, otherwise false
- */
-module.exports = function isAbsoluteURL(url) {
-  // A URL is considered absolute if it begins with "<scheme>://" or "//" (protocol-relative URL).
-  // RFC 3986 defines scheme name as a sequence of characters beginning with a letter and followed
-  // by any combination of letters, digits, plus, period, or hyphen.
-  return /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url);
-};
-
-
-/***/ }),
-
-/***/ 60650:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-/**
- * Determines whether the payload is an error thrown by Axios
- *
- * @param {*} payload The value to test
- * @returns {boolean} True if the payload is an error thrown by Axios, otherwise false
- */
-module.exports = function isAxiosError(payload) {
-  return utils.isObject(payload) && (payload.isAxiosError === true);
-};
-
-
-/***/ }),
-
-/***/ 33608:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-module.exports = (
-  utils.isStandardBrowserEnv() ?
-
-  // Standard browser envs have full support of the APIs needed to test
-  // whether the request URL is of the same origin as current location.
-    (function standardBrowserEnv() {
-      var msie = /(msie|trident)/i.test(navigator.userAgent);
-      var urlParsingNode = document.createElement('a');
-      var originURL;
-
-      /**
-    * Parse a URL to discover it's components
-    *
-    * @param {String} url The URL to be parsed
-    * @returns {Object}
-    */
-      function resolveURL(url) {
-        var href = url;
-
-        if (msie) {
-        // IE needs attribute set twice to normalize properties
-          urlParsingNode.setAttribute('href', href);
-          href = urlParsingNode.href;
-        }
-
-        urlParsingNode.setAttribute('href', href);
-
-        // urlParsingNode provides the UrlUtils interface - http://url.spec.whatwg.org/#urlutils
-        return {
-          href: urlParsingNode.href,
-          protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
-          host: urlParsingNode.host,
-          search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
-          hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
-          hostname: urlParsingNode.hostname,
-          port: urlParsingNode.port,
-          pathname: (urlParsingNode.pathname.charAt(0) === '/') ?
-            urlParsingNode.pathname :
-            '/' + urlParsingNode.pathname
-        };
-      }
-
-      originURL = resolveURL(window.location.href);
-
-      /**
-    * Determine if a URL shares the same origin as the current location
-    *
-    * @param {String} requestURL The URL to test
-    * @returns {boolean} True if URL shares the same origin, otherwise false
-    */
-      return function isURLSameOrigin(requestURL) {
-        var parsed = (utils.isString(requestURL)) ? resolveURL(requestURL) : requestURL;
-        return (parsed.protocol === originURL.protocol &&
-            parsed.host === originURL.host);
-      };
-    })() :
-
-  // Non standard browser envs (web workers, react-native) lack needed support.
-    (function nonStandardBrowserEnv() {
-      return function isURLSameOrigin() {
-        return true;
-      };
-    })()
-);
-
-
-/***/ }),
-
-/***/ 36240:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-module.exports = function normalizeHeaderName(headers, normalizedName) {
-  utils.forEach(headers, function processHeader(value, name) {
-    if (name !== normalizedName && name.toUpperCase() === normalizedName.toUpperCase()) {
-      headers[normalizedName] = value;
-      delete headers[name];
-    }
-  });
-};
-
-
-/***/ }),
-
-/***/ 86455:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-// Headers whose duplicates are ignored by node
-// c.f. https://nodejs.org/api/http.html#http_message_headers
-var ignoreDuplicateOf = [
-  'age', 'authorization', 'content-length', 'content-type', 'etag',
-  'expires', 'from', 'host', 'if-modified-since', 'if-unmodified-since',
-  'last-modified', 'location', 'max-forwards', 'proxy-authorization',
-  'referer', 'retry-after', 'user-agent'
-];
-
-/**
- * Parse headers into an object
- *
- * ```
- * Date: Wed, 27 Aug 2014 08:58:49 GMT
- * Content-Type: application/json
- * Connection: keep-alive
- * Transfer-Encoding: chunked
- * ```
- *
- * @param {String} headers Headers needing to be parsed
- * @returns {Object} Headers parsed into an object
- */
-module.exports = function parseHeaders(headers) {
-  var parsed = {};
-  var key;
-  var val;
-  var i;
-
-  if (!headers) { return parsed; }
-
-  utils.forEach(headers.split('\n'), function parser(line) {
-    i = line.indexOf(':');
-    key = utils.trim(line.substr(0, i)).toLowerCase();
-    val = utils.trim(line.substr(i + 1));
-
-    if (key) {
-      if (parsed[key] && ignoreDuplicateOf.indexOf(key) >= 0) {
-        return;
-      }
-      if (key === 'set-cookie') {
-        parsed[key] = (parsed[key] ? parsed[key] : []).concat([val]);
-      } else {
-        parsed[key] = parsed[key] ? parsed[key] + ', ' + val : val;
-      }
-    }
-  });
-
-  return parsed;
-};
-
-
-/***/ }),
-
-/***/ 66107:
-/***/ ((module) => {
-
-"use strict";
-
-
-module.exports = function parseProtocol(url) {
-  var match = /^([-+\w]{1,25})(:?\/\/|:)/.exec(url);
-  return match && match[1] || '';
-};
-
-
-/***/ }),
-
-/***/ 74850:
-/***/ ((module) => {
-
-"use strict";
-
-
-/**
- * Syntactic sugar for invoking a function and expanding an array for arguments.
- *
- * Common use case would be to use `Function.prototype.apply`.
- *
- *  ```js
- *  function f(x, y, z) {}
- *  var args = [1, 2, 3];
- *  f.apply(null, args);
- *  ```
- *
- * With `spread` this example can be re-written.
- *
- *  ```js
- *  spread(function(x, y, z) {})([1, 2, 3]);
- *  ```
- *
- * @param {Function} callback
- * @returns {Function}
- */
-module.exports = function spread(callback) {
-  return function wrap(arr) {
-    return callback.apply(null, arr);
-  };
-};
-
-
-/***/ }),
-
-/***/ 20470:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var utils = __nccwpck_require__(20328);
-
-/**
- * Convert a data object to FormData
- * @param {Object} obj
- * @param {?Object} [formData]
- * @returns {Object}
- **/
-
-function toFormData(obj, formData) {
-  // eslint-disable-next-line no-param-reassign
-  formData = formData || new FormData();
-
-  var stack = [];
-
-  function convertValue(value) {
-    if (value === null) return '';
-
-    if (utils.isDate(value)) {
-      return value.toISOString();
-    }
-
-    if (utils.isArrayBuffer(value) || utils.isTypedArray(value)) {
-      return typeof Blob === 'function' ? new Blob([value]) : Buffer.from(value);
-    }
-
-    return value;
-  }
-
-  function build(data, parentKey) {
-    if (utils.isPlainObject(data) || utils.isArray(data)) {
-      if (stack.indexOf(data) !== -1) {
-        throw Error('Circular reference detected in ' + parentKey);
-      }
-
-      stack.push(data);
-
-      utils.forEach(data, function each(value, key) {
-        if (utils.isUndefined(value)) return;
-        var fullKey = parentKey ? parentKey + '.' + key : key;
-        var arr;
-
-        if (value && !parentKey && typeof value === 'object') {
-          if (utils.endsWith(key, '{}')) {
-            // eslint-disable-next-line no-param-reassign
-            value = JSON.stringify(value);
-          } else if (utils.endsWith(key, '[]') && (arr = utils.toArray(value))) {
-            // eslint-disable-next-line func-names
-            arr.forEach(function(el) {
-              !utils.isUndefined(el) && formData.append(fullKey, convertValue(el));
-            });
-            return;
-          }
-        }
-
-        build(value, fullKey);
-      });
-
-      stack.pop();
-    } else {
-      formData.append(parentKey, convertValue(data));
-    }
-  }
-
-  build(obj);
-
-  return formData;
-}
-
-module.exports = toFormData;
-
-
-/***/ }),
-
-/***/ 51632:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var VERSION = (__nccwpck_require__(94322).version);
-var AxiosError = __nccwpck_require__(72093);
-
-var validators = {};
-
-// eslint-disable-next-line func-names
-['object', 'boolean', 'number', 'function', 'string', 'symbol'].forEach(function(type, i) {
-  validators[type] = function validator(thing) {
-    return typeof thing === type || 'a' + (i < 1 ? 'n ' : ' ') + type;
-  };
-});
-
-var deprecatedWarnings = {};
-
-/**
- * Transitional option validator
- * @param {function|boolean?} validator - set to false if the transitional option has been removed
- * @param {string?} version - deprecated version / removed since version
- * @param {string?} message - some message with additional info
- * @returns {function}
- */
-validators.transitional = function transitional(validator, version, message) {
-  function formatMessage(opt, desc) {
-    return '[Axios v' + VERSION + '] Transitional option \'' + opt + '\'' + desc + (message ? '. ' + message : '');
-  }
-
-  // eslint-disable-next-line func-names
-  return function(value, opt, opts) {
-    if (validator === false) {
-      throw new AxiosError(
-        formatMessage(opt, ' has been removed' + (version ? ' in ' + version : '')),
-        AxiosError.ERR_DEPRECATED
-      );
-    }
-
-    if (version && !deprecatedWarnings[opt]) {
-      deprecatedWarnings[opt] = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        formatMessage(
-          opt,
-          ' has been deprecated since v' + version + ' and will be removed in the near future'
-        )
-      );
-    }
-
-    return validator ? validator(value, opt, opts) : true;
-  };
-};
-
-/**
- * Assert object's properties type
- * @param {object} options
- * @param {object} schema
- * @param {boolean?} allowUnknown
- */
-
-function assertOptions(options, schema, allowUnknown) {
-  if (typeof options !== 'object') {
-    throw new AxiosError('options must be an object', AxiosError.ERR_BAD_OPTION_VALUE);
-  }
-  var keys = Object.keys(options);
-  var i = keys.length;
-  while (i-- > 0) {
-    var opt = keys[i];
-    var validator = schema[opt];
-    if (validator) {
-      var value = options[opt];
-      var result = value === undefined || validator(value, opt, options);
-      if (result !== true) {
-        throw new AxiosError('option ' + opt + ' must be ' + result, AxiosError.ERR_BAD_OPTION_VALUE);
-      }
-      continue;
-    }
-    if (allowUnknown !== true) {
-      throw new AxiosError('Unknown option ' + opt, AxiosError.ERR_BAD_OPTION);
-    }
-  }
-}
-
-module.exports = {
-  assertOptions: assertOptions,
-  validators: validators
-};
-
-
-/***/ }),
-
-/***/ 20328:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var bind = __nccwpck_require__(77065);
-
-// utils is a library of generic helper functions non-specific to axios
-
-var toString = Object.prototype.toString;
-
-// eslint-disable-next-line func-names
-var kindOf = (function(cache) {
-  // eslint-disable-next-line func-names
-  return function(thing) {
-    var str = toString.call(thing);
-    return cache[str] || (cache[str] = str.slice(8, -1).toLowerCase());
-  };
-})(Object.create(null));
-
-function kindOfTest(type) {
-  type = type.toLowerCase();
-  return function isKindOf(thing) {
-    return kindOf(thing) === type;
-  };
-}
-
-/**
- * Determine if a value is an Array
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is an Array, otherwise false
- */
-function isArray(val) {
-  return Array.isArray(val);
-}
-
-/**
- * Determine if a value is undefined
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if the value is undefined, otherwise false
- */
-function isUndefined(val) {
-  return typeof val === 'undefined';
-}
-
-/**
- * Determine if a value is a Buffer
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Buffer, otherwise false
- */
-function isBuffer(val) {
-  return val !== null && !isUndefined(val) && val.constructor !== null && !isUndefined(val.constructor)
-    && typeof val.constructor.isBuffer === 'function' && val.constructor.isBuffer(val);
-}
-
-/**
- * Determine if a value is an ArrayBuffer
- *
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is an ArrayBuffer, otherwise false
- */
-var isArrayBuffer = kindOfTest('ArrayBuffer');
-
-
-/**
- * Determine if a value is a view on an ArrayBuffer
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a view on an ArrayBuffer, otherwise false
- */
-function isArrayBufferView(val) {
-  var result;
-  if ((typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView)) {
-    result = ArrayBuffer.isView(val);
-  } else {
-    result = (val) && (val.buffer) && (isArrayBuffer(val.buffer));
-  }
-  return result;
-}
-
-/**
- * Determine if a value is a String
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a String, otherwise false
- */
-function isString(val) {
-  return typeof val === 'string';
-}
-
-/**
- * Determine if a value is a Number
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Number, otherwise false
- */
-function isNumber(val) {
-  return typeof val === 'number';
-}
-
-/**
- * Determine if a value is an Object
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is an Object, otherwise false
- */
-function isObject(val) {
-  return val !== null && typeof val === 'object';
-}
-
-/**
- * Determine if a value is a plain Object
- *
- * @param {Object} val The value to test
- * @return {boolean} True if value is a plain Object, otherwise false
- */
-function isPlainObject(val) {
-  if (kindOf(val) !== 'object') {
-    return false;
-  }
-
-  var prototype = Object.getPrototypeOf(val);
-  return prototype === null || prototype === Object.prototype;
-}
-
-/**
- * Determine if a value is a Date
- *
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Date, otherwise false
- */
-var isDate = kindOfTest('Date');
-
-/**
- * Determine if a value is a File
- *
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a File, otherwise false
- */
-var isFile = kindOfTest('File');
-
-/**
- * Determine if a value is a Blob
- *
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Blob, otherwise false
- */
-var isBlob = kindOfTest('Blob');
-
-/**
- * Determine if a value is a FileList
- *
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a File, otherwise false
- */
-var isFileList = kindOfTest('FileList');
-
-/**
- * Determine if a value is a Function
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Function, otherwise false
- */
-function isFunction(val) {
-  return toString.call(val) === '[object Function]';
-}
-
-/**
- * Determine if a value is a Stream
- *
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a Stream, otherwise false
- */
-function isStream(val) {
-  return isObject(val) && isFunction(val.pipe);
-}
-
-/**
- * Determine if a value is a FormData
- *
- * @param {Object} thing The value to test
- * @returns {boolean} True if value is an FormData, otherwise false
- */
-function isFormData(thing) {
-  var pattern = '[object FormData]';
-  return thing && (
-    (typeof FormData === 'function' && thing instanceof FormData) ||
-    toString.call(thing) === pattern ||
-    (isFunction(thing.toString) && thing.toString() === pattern)
-  );
-}
-
-/**
- * Determine if a value is a URLSearchParams object
- * @function
- * @param {Object} val The value to test
- * @returns {boolean} True if value is a URLSearchParams object, otherwise false
- */
-var isURLSearchParams = kindOfTest('URLSearchParams');
-
-/**
- * Trim excess whitespace off the beginning and end of a string
- *
- * @param {String} str The String to trim
- * @returns {String} The String freed of excess whitespace
- */
-function trim(str) {
-  return str.trim ? str.trim() : str.replace(/^\s+|\s+$/g, '');
-}
-
-/**
- * Determine if we're running in a standard browser environment
- *
- * This allows axios to run in a web worker, and react-native.
- * Both environments support XMLHttpRequest, but not fully standard globals.
- *
- * web workers:
- *  typeof window -> undefined
- *  typeof document -> undefined
- *
- * react-native:
- *  navigator.product -> 'ReactNative'
- * nativescript
- *  navigator.product -> 'NativeScript' or 'NS'
- */
-function isStandardBrowserEnv() {
-  if (typeof navigator !== 'undefined' && (navigator.product === 'ReactNative' ||
-                                           navigator.product === 'NativeScript' ||
-                                           navigator.product === 'NS')) {
-    return false;
-  }
-  return (
-    typeof window !== 'undefined' &&
-    typeof document !== 'undefined'
-  );
-}
-
-/**
- * Iterate over an Array or an Object invoking a function for each item.
- *
- * If `obj` is an Array callback will be called passing
- * the value, index, and complete array for each item.
- *
- * If 'obj' is an Object callback will be called passing
- * the value, key, and complete object for each property.
- *
- * @param {Object|Array} obj The object to iterate
- * @param {Function} fn The callback to invoke for each item
- */
-function forEach(obj, fn) {
-  // Don't bother if no value provided
-  if (obj === null || typeof obj === 'undefined') {
-    return;
-  }
-
-  // Force an array if not already something iterable
-  if (typeof obj !== 'object') {
-    /*eslint no-param-reassign:0*/
-    obj = [obj];
-  }
-
-  if (isArray(obj)) {
-    // Iterate over array values
-    for (var i = 0, l = obj.length; i < l; i++) {
-      fn.call(null, obj[i], i, obj);
-    }
-  } else {
-    // Iterate over object keys
-    for (var key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        fn.call(null, obj[key], key, obj);
-      }
-    }
-  }
-}
-
-/**
- * Accepts varargs expecting each argument to be an object, then
- * immutably merges the properties of each object and returns result.
- *
- * When multiple objects contain the same key the later object in
- * the arguments list will take precedence.
- *
- * Example:
- *
- * ```js
- * var result = merge({foo: 123}, {foo: 456});
- * console.log(result.foo); // outputs 456
- * ```
- *
- * @param {Object} obj1 Object to merge
- * @returns {Object} Result of all merge properties
- */
-function merge(/* obj1, obj2, obj3, ... */) {
-  var result = {};
-  function assignValue(val, key) {
-    if (isPlainObject(result[key]) && isPlainObject(val)) {
-      result[key] = merge(result[key], val);
-    } else if (isPlainObject(val)) {
-      result[key] = merge({}, val);
-    } else if (isArray(val)) {
-      result[key] = val.slice();
-    } else {
-      result[key] = val;
-    }
-  }
-
-  for (var i = 0, l = arguments.length; i < l; i++) {
-    forEach(arguments[i], assignValue);
-  }
-  return result;
-}
-
-/**
- * Extends object a by mutably adding to it the properties of object b.
- *
- * @param {Object} a The object to be extended
- * @param {Object} b The object to copy properties from
- * @param {Object} thisArg The object to bind function to
- * @return {Object} The resulting value of object a
- */
-function extend(a, b, thisArg) {
-  forEach(b, function assignValue(val, key) {
-    if (thisArg && typeof val === 'function') {
-      a[key] = bind(val, thisArg);
-    } else {
-      a[key] = val;
-    }
-  });
-  return a;
-}
-
-/**
- * Remove byte order marker. This catches EF BB BF (the UTF-8 BOM)
- *
- * @param {string} content with BOM
- * @return {string} content value without BOM
- */
-function stripBOM(content) {
-  if (content.charCodeAt(0) === 0xFEFF) {
-    content = content.slice(1);
-  }
-  return content;
-}
-
-/**
- * Inherit the prototype methods from one constructor into another
- * @param {function} constructor
- * @param {function} superConstructor
- * @param {object} [props]
- * @param {object} [descriptors]
- */
-
-function inherits(constructor, superConstructor, props, descriptors) {
-  constructor.prototype = Object.create(superConstructor.prototype, descriptors);
-  constructor.prototype.constructor = constructor;
-  props && Object.assign(constructor.prototype, props);
-}
-
-/**
- * Resolve object with deep prototype chain to a flat object
- * @param {Object} sourceObj source object
- * @param {Object} [destObj]
- * @param {Function} [filter]
- * @returns {Object}
- */
-
-function toFlatObject(sourceObj, destObj, filter) {
-  var props;
-  var i;
-  var prop;
-  var merged = {};
-
-  destObj = destObj || {};
-
-  do {
-    props = Object.getOwnPropertyNames(sourceObj);
-    i = props.length;
-    while (i-- > 0) {
-      prop = props[i];
-      if (!merged[prop]) {
-        destObj[prop] = sourceObj[prop];
-        merged[prop] = true;
-      }
-    }
-    sourceObj = Object.getPrototypeOf(sourceObj);
-  } while (sourceObj && (!filter || filter(sourceObj, destObj)) && sourceObj !== Object.prototype);
-
-  return destObj;
-}
-
-/*
- * determines whether a string ends with the characters of a specified string
- * @param {String} str
- * @param {String} searchString
- * @param {Number} [position= 0]
- * @returns {boolean}
- */
-function endsWith(str, searchString, position) {
-  str = String(str);
-  if (position === undefined || position > str.length) {
-    position = str.length;
-  }
-  position -= searchString.length;
-  var lastIndex = str.indexOf(searchString, position);
-  return lastIndex !== -1 && lastIndex === position;
-}
-
-
-/**
- * Returns new array from array like object
- * @param {*} [thing]
- * @returns {Array}
- */
-function toArray(thing) {
-  if (!thing) return null;
-  var i = thing.length;
-  if (isUndefined(i)) return null;
-  var arr = new Array(i);
-  while (i-- > 0) {
-    arr[i] = thing[i];
-  }
-  return arr;
-}
-
-// eslint-disable-next-line func-names
-var isTypedArray = (function(TypedArray) {
-  // eslint-disable-next-line func-names
-  return function(thing) {
-    return TypedArray && thing instanceof TypedArray;
-  };
-})(typeof Uint8Array !== 'undefined' && Object.getPrototypeOf(Uint8Array));
-
-module.exports = {
-  isArray: isArray,
-  isArrayBuffer: isArrayBuffer,
-  isBuffer: isBuffer,
-  isFormData: isFormData,
-  isArrayBufferView: isArrayBufferView,
-  isString: isString,
-  isNumber: isNumber,
-  isObject: isObject,
-  isPlainObject: isPlainObject,
-  isUndefined: isUndefined,
-  isDate: isDate,
-  isFile: isFile,
-  isBlob: isBlob,
-  isFunction: isFunction,
-  isStream: isStream,
-  isURLSearchParams: isURLSearchParams,
-  isStandardBrowserEnv: isStandardBrowserEnv,
-  forEach: forEach,
-  merge: merge,
-  extend: extend,
-  trim: trim,
-  stripBOM: stripBOM,
-  inherits: inherits,
-  toFlatObject: toFlatObject,
-  kindOf: kindOf,
-  kindOfTest: kindOfTest,
-  endsWith: endsWith,
-  toArray: toArray,
-  isTypedArray: isTypedArray,
-  isFileList: isFileList
-};
-
-
-/***/ }),
-
 /***/ 83682:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -9456,6 +6675,11 @@ events.forEach(function (event) {
   };
 });
 
+var InvalidUrlError = createErrorType(
+  "ERR_INVALID_URL",
+  "Invalid URL",
+  TypeError
+);
 // Error types with codes
 var RedirectionError = createErrorType(
   "ERR_FR_REDIRECTION_FAILURE",
@@ -9516,10 +6740,10 @@ RedirectableRequest.prototype.write = function (data, encoding, callback) {
   }
 
   // Validate input and shift parameters if necessary
-  if (!(typeof data === "string" || typeof data === "object" && ("length" in data))) {
+  if (!isString(data) && !isBuffer(data)) {
     throw new TypeError("data should be a string, Buffer or Uint8Array");
   }
-  if (typeof encoding === "function") {
+  if (isFunction(encoding)) {
     callback = encoding;
     encoding = null;
   }
@@ -9548,11 +6772,11 @@ RedirectableRequest.prototype.write = function (data, encoding, callback) {
 // Ends the current native request
 RedirectableRequest.prototype.end = function (data, encoding, callback) {
   // Shift parameters if necessary
-  if (typeof data === "function") {
+  if (isFunction(data)) {
     callback = data;
     data = encoding = null;
   }
-  else if (typeof encoding === "function") {
+  else if (isFunction(encoding)) {
     callback = encoding;
     encoding = null;
   }
@@ -9729,7 +6953,7 @@ RedirectableRequest.prototype._performRequest = function () {
     url.format(this._options) :
     // When making a request to a proxy, […]
     // a client MUST send the target URI in absolute-form […].
-    this._currentUrl = this._options.path;
+    this._options.path;
 
   // End a redirected request
   // (The first request must be ended explicitly with RedirectableRequest#end)
@@ -9850,7 +7074,7 @@ RedirectableRequest.prototype._processResponse = function (response) {
     redirectUrl = url.resolve(currentUrl, location);
   }
   catch (cause) {
-    this.emit("error", new RedirectionError(cause));
+    this.emit("error", new RedirectionError({ cause: cause }));
     return;
   }
 
@@ -9870,7 +7094,7 @@ RedirectableRequest.prototype._processResponse = function (response) {
   }
 
   // Evaluate the beforeRedirect callback
-  if (typeof beforeRedirect === "function") {
+  if (isFunction(beforeRedirect)) {
     var responseDetails = {
       headers: response.headers,
       statusCode: statusCode,
@@ -9895,7 +7119,7 @@ RedirectableRequest.prototype._processResponse = function (response) {
     this._performRequest();
   }
   catch (cause) {
-    this.emit("error", new RedirectionError(cause));
+    this.emit("error", new RedirectionError({ cause: cause }));
   }
 };
 
@@ -9917,15 +7141,19 @@ function wrap(protocols) {
     // Executes a request, following redirects
     function request(input, options, callback) {
       // Parse parameters
-      if (typeof input === "string") {
-        var urlStr = input;
+      if (isString(input)) {
+        var parsed;
         try {
-          input = urlToOptions(new URL(urlStr));
+          parsed = urlToOptions(new URL(input));
         }
         catch (err) {
           /* istanbul ignore next */
-          input = url.parse(urlStr);
+          parsed = url.parse(input);
         }
+        if (!isString(parsed.protocol)) {
+          throw new InvalidUrlError({ input });
+        }
+        input = parsed;
       }
       else if (URL && (input instanceof URL)) {
         input = urlToOptions(input);
@@ -9935,7 +7163,7 @@ function wrap(protocols) {
         options = input;
         input = { protocol: protocol };
       }
-      if (typeof options === "function") {
+      if (isFunction(options)) {
         callback = options;
         options = null;
       }
@@ -9946,6 +7174,9 @@ function wrap(protocols) {
         maxBodyLength: exports.maxBodyLength,
       }, input, options);
       options.nativeProtocols = nativeProtocols;
+      if (!isString(options.host) && !isString(options.hostname)) {
+        options.hostname = "::1";
+      }
 
       assert.equal(options.protocol, protocol, "protocol mismatch");
       debug("options", options);
@@ -10003,21 +7234,19 @@ function removeMatchingHeaders(regex, headers) {
     undefined : String(lastValue).trim();
 }
 
-function createErrorType(code, defaultMessage) {
-  function CustomError(cause) {
+function createErrorType(code, message, baseClass) {
+  // Create constructor
+  function CustomError(properties) {
     Error.captureStackTrace(this, this.constructor);
-    if (!cause) {
-      this.message = defaultMessage;
-    }
-    else {
-      this.message = defaultMessage + ": " + cause.message;
-      this.cause = cause;
-    }
+    Object.assign(this, properties || {});
+    this.code = code;
+    this.message = this.cause ? message + ": " + this.cause.message : message;
   }
-  CustomError.prototype = new Error();
+
+  // Attach constructor and set default properties
+  CustomError.prototype = new (baseClass || Error)();
   CustomError.prototype.constructor = CustomError;
   CustomError.prototype.name = "Error [" + code + "]";
-  CustomError.prototype.code = code;
   return CustomError;
 }
 
@@ -10030,8 +7259,21 @@ function abortRequest(request) {
 }
 
 function isSubdomain(subdomain, domain) {
-  const dot = subdomain.length - domain.length - 1;
+  assert(isString(subdomain) && isString(domain));
+  var dot = subdomain.length - domain.length - 1;
   return dot > 0 && subdomain[dot] === "." && subdomain.endsWith(domain);
+}
+
+function isString(value) {
+  return typeof value === "string" || value instanceof String;
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isBuffer(value) {
+  return typeof value === "object" && ("length" in value);
 }
 
 // Exports
@@ -10599,12 +7841,16 @@ LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ***************************************************************************** */
-/* global global, define, System, Reflect, Promise */
+/* global global, define, Symbol, Reflect, Promise, SuppressedError */
 var __extends;
 var __assign;
 var __rest;
 var __decorate;
 var __param;
+var __esDecorate;
+var __runInitializers;
+var __propKey;
+var __setFunctionName;
 var __metadata;
 var __awaiter;
 var __generator;
@@ -10625,6 +7871,8 @@ var __classPrivateFieldGet;
 var __classPrivateFieldSet;
 var __classPrivateFieldIn;
 var __createBinding;
+var __addDisposableResource;
+var __disposeResources;
 (function (factory) {
     var root = typeof global === "object" ? global : typeof self === "object" ? self : typeof this === "object" ? this : {};
     if (typeof define === "function" && define.amd) {
@@ -10692,6 +7940,51 @@ var __createBinding;
         return function (target, key) { decorator(target, key, paramIndex); }
     };
 
+    __esDecorate = function (ctor, descriptorIn, decorators, contextIn, initializers, extraInitializers) {
+        function accept(f) { if (f !== void 0 && typeof f !== "function") throw new TypeError("Function expected"); return f; }
+        var kind = contextIn.kind, key = kind === "getter" ? "get" : kind === "setter" ? "set" : "value";
+        var target = !descriptorIn && ctor ? contextIn["static"] ? ctor : ctor.prototype : null;
+        var descriptor = descriptorIn || (target ? Object.getOwnPropertyDescriptor(target, contextIn.name) : {});
+        var _, done = false;
+        for (var i = decorators.length - 1; i >= 0; i--) {
+            var context = {};
+            for (var p in contextIn) context[p] = p === "access" ? {} : contextIn[p];
+            for (var p in contextIn.access) context.access[p] = contextIn.access[p];
+            context.addInitializer = function (f) { if (done) throw new TypeError("Cannot add initializers after decoration has completed"); extraInitializers.push(accept(f || null)); };
+            var result = (0, decorators[i])(kind === "accessor" ? { get: descriptor.get, set: descriptor.set } : descriptor[key], context);
+            if (kind === "accessor") {
+                if (result === void 0) continue;
+                if (result === null || typeof result !== "object") throw new TypeError("Object expected");
+                if (_ = accept(result.get)) descriptor.get = _;
+                if (_ = accept(result.set)) descriptor.set = _;
+                if (_ = accept(result.init)) initializers.unshift(_);
+            }
+            else if (_ = accept(result)) {
+                if (kind === "field") initializers.unshift(_);
+                else descriptor[key] = _;
+            }
+        }
+        if (target) Object.defineProperty(target, contextIn.name, descriptor);
+        done = true;
+    };
+
+    __runInitializers = function (thisArg, initializers, value) {
+        var useValue = arguments.length > 2;
+        for (var i = 0; i < initializers.length; i++) {
+            value = useValue ? initializers[i].call(thisArg, value) : initializers[i].call(thisArg);
+        }
+        return useValue ? value : void 0;
+    };
+
+    __propKey = function (x) {
+        return typeof x === "symbol" ? x : "".concat(x);
+    };
+
+    __setFunctionName = function (f, name, prefix) {
+        if (typeof name === "symbol") name = name.description ? "[".concat(name.description, "]") : "";
+        return Object.defineProperty(f, "name", { configurable: true, value: prefix ? "".concat(prefix, " ", name) : name });
+    };
+
     __metadata = function (metadataKey, metadataValue) {
         if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(metadataKey, metadataValue);
     };
@@ -10712,7 +8005,7 @@ var __createBinding;
         function verb(n) { return function (v) { return step([n, v]); }; }
         function step(op) {
             if (f) throw new TypeError("Generator is already executing.");
-            while (_) try {
+            while (g && (g = 0, op[0] && (_ = 0)), _) try {
                 if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
                 if (y = 0, t) op = [op[0] & 2, t.value];
                 switch (op[0]) {
@@ -10824,7 +8117,7 @@ var __createBinding;
     __asyncDelegator = function (o) {
         var i, p;
         return i = {}, verb("next"), verb("throw", function (e) { throw e; }), verb("return"), i[Symbol.iterator] = function () { return this; }, i;
-        function verb(n, f) { i[n] = o[n] ? function (v) { return (p = !p) ? { value: __await(o[n](v)), done: n === "return" } : f ? f(v) : v; } : f; }
+        function verb(n, f) { i[n] = o[n] ? function (v) { return (p = !p) ? { value: __await(o[n](v)), done: false } : f ? f(v) : v; } : f; }
     };
 
     __asyncValues = function (o) {
@@ -10876,11 +8169,62 @@ var __createBinding;
         return typeof state === "function" ? receiver === state : state.has(receiver);
     };
 
+    __addDisposableResource = function (env, value, async) {
+        if (value !== null && value !== void 0) {
+            if (typeof value !== "object" && typeof value !== "function") throw new TypeError("Object expected.");
+            var dispose;
+            if (async) {
+                if (!Symbol.asyncDispose) throw new TypeError("Symbol.asyncDispose is not defined.");
+                dispose = value[Symbol.asyncDispose];
+            }
+            if (dispose === void 0) {
+                if (!Symbol.dispose) throw new TypeError("Symbol.dispose is not defined.");
+                dispose = value[Symbol.dispose];
+            }
+            if (typeof dispose !== "function") throw new TypeError("Object not disposable.");
+            env.stack.push({ value: value, dispose: dispose, async: async });
+        }
+        else if (async) {
+            env.stack.push({ async: true });
+        }
+        return value;
+    };
+
+    var _SuppressedError = typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
+        var e = new Error(message);
+        return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+    };
+
+    __disposeResources = function (env) {
+        function fail(e) {
+            env.error = env.hasError ? new _SuppressedError(e, env.error, "An error was suppressed during disposal.") : e;
+            env.hasError = true;
+        }
+        function next() {
+            while (env.stack.length) {
+                var rec = env.stack.pop();
+                try {
+                    var result = rec.dispose && rec.dispose.call(rec.value);
+                    if (rec.async) return Promise.resolve(result).then(next, function(e) { fail(e); return next(); });
+                }
+                catch (e) {
+                    fail(e);
+                }
+            }
+            if (env.hasError) throw env.error;
+        }
+        return next();
+    };
+
     exporter("__extends", __extends);
     exporter("__assign", __assign);
     exporter("__rest", __rest);
     exporter("__decorate", __decorate);
     exporter("__param", __param);
+    exporter("__esDecorate", __esDecorate);
+    exporter("__runInitializers", __runInitializers);
+    exporter("__propKey", __propKey);
+    exporter("__setFunctionName", __setFunctionName);
     exporter("__metadata", __metadata);
     exporter("__awaiter", __awaiter);
     exporter("__generator", __generator);
@@ -10901,6 +8245,8 @@ var __createBinding;
     exporter("__classPrivateFieldGet", __classPrivateFieldGet);
     exporter("__classPrivateFieldSet", __classPrivateFieldSet);
     exporter("__classPrivateFieldIn", __classPrivateFieldIn);
+    exporter("__addDisposableResource", __addDisposableResource);
+    exporter("__disposeResources", __disposeResources);
 });
 
 
@@ -10924,7 +8270,7 @@ class Backlog {
                 url: '/rest/agile/1.0/backlog/issue',
                 method: 'POST',
                 data: {
-                    issues: parameters === null || parameters === void 0 ? void 0 : parameters.issues,
+                    issues: parameters.issues,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -10992,10 +8338,10 @@ class Board {
                 url: '/rest/agile/1.0/board',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    type: parameters === null || parameters === void 0 ? void 0 : parameters.type,
-                    filterId: parameters === null || parameters === void 0 ? void 0 : parameters.filterId,
-                    location: parameters === null || parameters === void 0 ? void 0 : parameters.location,
+                    name: parameters.name,
+                    type: parameters.type,
+                    filterId: parameters.filterId,
+                    location: parameters.location,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11315,9 +8661,9 @@ class Builds {
                 url: '/rest/builds/0.1/bulk',
                 method: 'POST',
                 data: {
-                    properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
-                    builds: parameters === null || parameters === void 0 ? void 0 : parameters.builds,
-                    providerMetadata: parameters === null || parameters === void 0 ? void 0 : parameters.providerMetadata,
+                    properties: parameters.properties,
+                    builds: parameters.builds,
+                    providerMetadata: parameters.providerMetadata,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11329,7 +8675,7 @@ class Builds {
                 url: '/rest/builds/0.1/bulkByProperties',
                 method: 'DELETE',
                 params: {
-                    _updateSequenceNumber: (parameters === null || parameters === void 0 ? void 0 : parameters._updateSequenceNumber) || (parameters === null || parameters === void 0 ? void 0 : parameters.updateSequenceNumber),
+                    _updateSequenceNumber: parameters._updateSequenceNumber || parameters.updateSequenceNumber,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11384,6 +8730,7 @@ class AgileClient extends clients_1.BaseClient {
         this.issue = new __1.Issue(this);
         this.project = new __1.Project(this);
         this.remoteLinks = new __1.RemoteLinks(this);
+        this.securityInformation = new __1.SecurityInformation(this);
         this.sprint = new __1.Sprint(this);
     }
 }
@@ -11422,9 +8769,9 @@ class Deployments {
                 url: '/rest/deployments/0.1/bulk',
                 method: 'POST',
                 data: {
-                    properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
-                    deployments: parameters === null || parameters === void 0 ? void 0 : parameters.deployments,
-                    providerMetadata: parameters === null || parameters === void 0 ? void 0 : parameters.providerMetadata,
+                    properties: parameters.properties,
+                    deployments: parameters.deployments,
+                    providerMetadata: parameters.providerMetadata,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11436,7 +8783,7 @@ class Deployments {
                 url: '/rest/deployments/0.1/bulkByProperties',
                 method: 'DELETE',
                 params: {
-                    _updateSequenceNumber: (parameters === null || parameters === void 0 ? void 0 : parameters._updateSequenceNumber) || (parameters === null || parameters === void 0 ? void 0 : parameters.updateSequenceNumber),
+                    _updateSequenceNumber: parameters._updateSequenceNumber || parameters.updateSequenceNumber,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11498,6 +8845,7 @@ class DevelopmentInformation {
                 data: {
                     repositories: parameters.repositories,
                     preventTransitions: parameters.preventTransitions,
+                    operationType: parameters.operationType,
                     properties: parameters.properties,
                     providerMetadata: parameters.providerMetadata,
                 },
@@ -11715,9 +9063,9 @@ class FeatureFlags {
                 url: '/rest/featureflags/0.1/bulk',
                 method: 'POST',
                 data: {
-                    properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
-                    flags: parameters === null || parameters === void 0 ? void 0 : parameters.flags,
-                    providerMetadata: parameters === null || parameters === void 0 ? void 0 : parameters.providerMetadata,
+                    properties: parameters.properties,
+                    flags: parameters.flags,
+                    providerMetadata: parameters.providerMetadata,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -11780,6 +9128,7 @@ tslib_1.__exportStar(__nccwpck_require__(47243), exports);
 tslib_1.__exportStar(__nccwpck_require__(70054), exports);
 tslib_1.__exportStar(__nccwpck_require__(530), exports);
 tslib_1.__exportStar(__nccwpck_require__(49766), exports);
+tslib_1.__exportStar(__nccwpck_require__(30168), exports);
 tslib_1.__exportStar(__nccwpck_require__(4406), exports);
 exports.AgileModels = __nccwpck_require__(25695);
 exports.AgileParameters = __nccwpck_require__(48324);
@@ -12172,6 +9521,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 96650:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=fields.js.map
+
+/***/ }),
+
+/***/ 25042:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=fixVersion.js.map
+
+/***/ }),
+
 /***/ 27583:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12390,6 +9759,8 @@ tslib_1.__exportStar(__nccwpck_require__(79643), exports);
 tslib_1.__exportStar(__nccwpck_require__(64970), exports);
 tslib_1.__exportStar(__nccwpck_require__(54148), exports);
 tslib_1.__exportStar(__nccwpck_require__(66802), exports);
+tslib_1.__exportStar(__nccwpck_require__(96650), exports);
+tslib_1.__exportStar(__nccwpck_require__(25042), exports);
 tslib_1.__exportStar(__nccwpck_require__(27583), exports);
 tslib_1.__exportStar(__nccwpck_require__(7792), exports);
 tslib_1.__exportStar(__nccwpck_require__(59278), exports);
@@ -12412,16 +9783,22 @@ tslib_1.__exportStar(__nccwpck_require__(2746), exports);
 tslib_1.__exportStar(__nccwpck_require__(61987), exports);
 tslib_1.__exportStar(__nccwpck_require__(32516), exports);
 tslib_1.__exportStar(__nccwpck_require__(72376), exports);
+tslib_1.__exportStar(__nccwpck_require__(4208), exports);
 tslib_1.__exportStar(__nccwpck_require__(92160), exports);
+tslib_1.__exportStar(__nccwpck_require__(27232), exports);
+tslib_1.__exportStar(__nccwpck_require__(48517), exports);
 tslib_1.__exportStar(__nccwpck_require__(47298), exports);
 tslib_1.__exportStar(__nccwpck_require__(67566), exports);
 tslib_1.__exportStar(__nccwpck_require__(86121), exports);
+tslib_1.__exportStar(__nccwpck_require__(63855), exports);
 tslib_1.__exportStar(__nccwpck_require__(15209), exports);
 tslib_1.__exportStar(__nccwpck_require__(26888), exports);
 tslib_1.__exportStar(__nccwpck_require__(9369), exports);
 tslib_1.__exportStar(__nccwpck_require__(61266), exports);
 tslib_1.__exportStar(__nccwpck_require__(97201), exports);
 tslib_1.__exportStar(__nccwpck_require__(39726), exports);
+tslib_1.__exportStar(__nccwpck_require__(25667), exports);
+tslib_1.__exportStar(__nccwpck_require__(24300), exports);
 tslib_1.__exportStar(__nccwpck_require__(86680), exports);
 tslib_1.__exportStar(__nccwpck_require__(92685), exports);
 tslib_1.__exportStar(__nccwpck_require__(10316), exports);
@@ -12433,6 +9810,8 @@ tslib_1.__exportStar(__nccwpck_require__(18783), exports);
 tslib_1.__exportStar(__nccwpck_require__(15225), exports);
 tslib_1.__exportStar(__nccwpck_require__(29081), exports);
 tslib_1.__exportStar(__nccwpck_require__(69724), exports);
+tslib_1.__exportStar(__nccwpck_require__(78449), exports);
+tslib_1.__exportStar(__nccwpck_require__(96844), exports);
 tslib_1.__exportStar(__nccwpck_require__(38675), exports);
 tslib_1.__exportStar(__nccwpck_require__(93282), exports);
 tslib_1.__exportStar(__nccwpck_require__(752), exports);
@@ -12440,11 +9819,13 @@ tslib_1.__exportStar(__nccwpck_require__(73436), exports);
 tslib_1.__exportStar(__nccwpck_require__(94758), exports);
 tslib_1.__exportStar(__nccwpck_require__(63270), exports);
 tslib_1.__exportStar(__nccwpck_require__(50453), exports);
+tslib_1.__exportStar(__nccwpck_require__(25923), exports);
 tslib_1.__exportStar(__nccwpck_require__(11329), exports);
 tslib_1.__exportStar(__nccwpck_require__(10290), exports);
+tslib_1.__exportStar(__nccwpck_require__(2245), exports);
 tslib_1.__exportStar(__nccwpck_require__(82497), exports);
-tslib_1.__exportStar(__nccwpck_require__(97775), exports);
 tslib_1.__exportStar(__nccwpck_require__(39076), exports);
+tslib_1.__exportStar(__nccwpck_require__(91419), exports);
 //# sourceMappingURL=index.js.map
 
 /***/ }),
@@ -12489,6 +9870,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 4208:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=issueType.js.map
+
+/***/ }),
+
 /***/ 92160:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12509,6 +9900,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 27232:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=linkedSecurityWorkspaceIds.js.map
+
+/***/ }),
+
+/***/ 48517:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=linkedWorkspace.js.map
+
+/***/ }),
+
 /***/ 67566:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12526,6 +9937,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=moveIssuesToBoard.js.map
+
+/***/ }),
+
+/***/ 63855:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=operations.js.map
 
 /***/ }),
 
@@ -12586,6 +10007,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=partialSuccess.js.map
+
+/***/ }),
+
+/***/ 25667:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=progress.js.map
+
+/***/ }),
+
+/***/ 24300:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=project.js.map
 
 /***/ }),
 
@@ -12684,7 +10125,7 @@ var Sprint;
         State["Active"] = "active";
         State["Closed"] = "closed";
     })(State = Sprint.State || (Sprint.State = {}));
-})(Sprint = exports.Sprint || (exports.Sprint = {}));
+})(Sprint || (exports.Sprint = Sprint = {}));
 //# sourceMappingURL=sprint.js.map
 
 /***/ }),
@@ -12706,6 +10147,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=sprintSwap.js.map
+
+/***/ }),
+
+/***/ 78449:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=status.js.map
+
+/***/ }),
+
+/***/ 96844:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=statusCategory.js.map
 
 /***/ }),
 
@@ -12779,6 +10240,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 25923:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=submittedVulnerabilitiesResult.js.map
+
+/***/ }),
+
 /***/ 11329:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12799,6 +10270,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 2245:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=user.js.map
+
+/***/ }),
+
 /***/ 82497:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12809,16 +10290,6 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
-/***/ 97775:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-//# sourceMappingURL=userJson.js.map
-
-/***/ }),
-
 /***/ 39076:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12826,6 +10297,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=version.js.map
+
+/***/ }),
+
+/***/ 91419:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=vulnerability.js.map
 
 /***/ }),
 
@@ -12949,6 +10430,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 71364:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteLinkedWorkspaces.js.map
+
+/***/ }),
+
 /***/ 17063:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -12996,6 +10487,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deleteSprint.js.map
+
+/***/ }),
+
+/***/ 71691:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteVulnerabilitiesByProperty.js.map
+
+/***/ }),
+
+/***/ 26617:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteVulnerabilityById.js.map
 
 /***/ }),
 
@@ -13289,6 +10800,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 84798:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getLinkedWorkspaceById.js.map
+
+/***/ }),
+
 /***/ 35279:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -13379,6 +10900,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 89371:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getVulnerabilityById.js.map
+
+/***/ }),
+
 /***/ 48324:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -13398,11 +10929,14 @@ tslib_1.__exportStar(__nccwpck_require__(42798), exports);
 tslib_1.__exportStar(__nccwpck_require__(27886), exports);
 tslib_1.__exportStar(__nccwpck_require__(30816), exports);
 tslib_1.__exportStar(__nccwpck_require__(23471), exports);
+tslib_1.__exportStar(__nccwpck_require__(71364), exports);
 tslib_1.__exportStar(__nccwpck_require__(17063), exports);
 tslib_1.__exportStar(__nccwpck_require__(5208), exports);
 tslib_1.__exportStar(__nccwpck_require__(94911), exports);
 tslib_1.__exportStar(__nccwpck_require__(50176), exports);
 tslib_1.__exportStar(__nccwpck_require__(82284), exports);
+tslib_1.__exportStar(__nccwpck_require__(71691), exports);
+tslib_1.__exportStar(__nccwpck_require__(26617), exports);
 tslib_1.__exportStar(__nccwpck_require__(6081), exports);
 tslib_1.__exportStar(__nccwpck_require__(77255), exports);
 tslib_1.__exportStar(__nccwpck_require__(93087), exports);
@@ -13432,6 +10966,7 @@ tslib_1.__exportStar(__nccwpck_require__(30162), exports);
 tslib_1.__exportStar(__nccwpck_require__(9291), exports);
 tslib_1.__exportStar(__nccwpck_require__(19230), exports);
 tslib_1.__exportStar(__nccwpck_require__(71683), exports);
+tslib_1.__exportStar(__nccwpck_require__(84798), exports);
 tslib_1.__exportStar(__nccwpck_require__(35279), exports);
 tslib_1.__exportStar(__nccwpck_require__(85257), exports);
 tslib_1.__exportStar(__nccwpck_require__(17370), exports);
@@ -13441,6 +10976,7 @@ tslib_1.__exportStar(__nccwpck_require__(65981), exports);
 tslib_1.__exportStar(__nccwpck_require__(40100), exports);
 tslib_1.__exportStar(__nccwpck_require__(77456), exports);
 tslib_1.__exportStar(__nccwpck_require__(92038), exports);
+tslib_1.__exportStar(__nccwpck_require__(89371), exports);
 tslib_1.__exportStar(__nccwpck_require__(37360), exports);
 tslib_1.__exportStar(__nccwpck_require__(11963), exports);
 tslib_1.__exportStar(__nccwpck_require__(51138), exports);
@@ -13459,6 +10995,8 @@ tslib_1.__exportStar(__nccwpck_require__(86453), exports);
 tslib_1.__exportStar(__nccwpck_require__(29509), exports);
 tslib_1.__exportStar(__nccwpck_require__(65292), exports);
 tslib_1.__exportStar(__nccwpck_require__(61383), exports);
+tslib_1.__exportStar(__nccwpck_require__(81619), exports);
+tslib_1.__exportStar(__nccwpck_require__(39940), exports);
 tslib_1.__exportStar(__nccwpck_require__(96995), exports);
 tslib_1.__exportStar(__nccwpck_require__(80284), exports);
 tslib_1.__exportStar(__nccwpck_require__(57160), exports);
@@ -13646,6 +11184,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 81619:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=submitVulnerabilities.js.map
+
+/***/ }),
+
+/***/ 39940:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=submitWorkspaces.js.map
+
+/***/ }),
+
 /***/ 96995:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -13684,6 +11242,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Project = void 0;
 const tslib_1 = __nccwpck_require__(89106);
+/** @deprecated Will be removed in the next major version. */
 class Project {
     constructor(client) {
         this.client = client;
@@ -13721,9 +11280,9 @@ class RemoteLinks {
                 url: '/rest/remotelinks/1.0/bulk',
                 method: 'POST',
                 data: {
-                    properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
-                    remoteLinks: parameters === null || parameters === void 0 ? void 0 : parameters.remoteLinks,
-                    providerMetadata: parameters === null || parameters === void 0 ? void 0 : parameters.providerMetadata,
+                    properties: parameters.properties,
+                    remoteLinks: parameters.remoteLinks,
+                    providerMetadata: parameters.providerMetadata,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -13735,8 +11294,8 @@ class RemoteLinks {
                 url: '/rest/remotelinks/1.0/bulkByProperties',
                 method: 'DELETE',
                 params: {
-                    _updateSequenceNumber: (parameters === null || parameters === void 0 ? void 0 : parameters._updateSequenceNumber) || (parameters === null || parameters === void 0 ? void 0 : parameters.updateSequenceNumber),
-                    params: parameters === null || parameters === void 0 ? void 0 : parameters.params,
+                    _updateSequenceNumber: parameters._updateSequenceNumber || parameters.updateSequenceNumber,
+                    params: parameters.params,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -13769,6 +11328,108 @@ exports.RemoteLinks = RemoteLinks;
 
 /***/ }),
 
+/***/ 30168:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SecurityInformation = void 0;
+const tslib_1 = __nccwpck_require__(89106);
+class SecurityInformation {
+    constructor(client) {
+        this.client = client;
+    }
+    submitWorkspaces(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/security/1.0/linkedWorkspaces/bulk',
+                method: 'POST',
+                data: {
+                    workspaceIds: parameters.workspaceIds,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteLinkedWorkspaces(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/security/1.0/linkedWorkspaces/bulk',
+                method: 'DELETE',
+                params: {
+                    workspaceIds: parameters.workspaceIds,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getLinkedWorkspaces(callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/security/1.0/linkedWorkspaces',
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getLinkedWorkspaceById(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/security/1.0/linkedWorkspaces/${parameters.workspaceId}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    submitVulnerabilities(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/security/1.0/bulk',
+                method: 'POST',
+                data: {
+                    properties: parameters.properties,
+                    vulnerabilities: parameters.vulnerabilities,
+                    providerMetadata: parameters.providerMetadata,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteVulnerabilitiesByProperty(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/security/1.0/bulkByProperties',
+                method: 'DELETE',
+                params: parameters,
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getVulnerabilityById(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/security/1.0/vulnerability/${parameters.vulnerabilityId}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteVulnerabilityById(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/security/1.0/vulnerability/${parameters.vulnerabilityId}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+}
+exports.SecurityInformation = SecurityInformation;
+//# sourceMappingURL=securityInformation.js.map
+
+/***/ }),
+
 /***/ 4406:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -13787,11 +11448,11 @@ class Sprint {
                 url: '/rest/agile/1.0/sprint',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    startDate: parameters === null || parameters === void 0 ? void 0 : parameters.startDate,
-                    endDate: parameters === null || parameters === void 0 ? void 0 : parameters.endDate,
-                    originBoardId: parameters === null || parameters === void 0 ? void 0 : parameters.originBoardId,
-                    goal: parameters === null || parameters === void 0 ? void 0 : parameters.goal,
+                    name: parameters.name,
+                    startDate: parameters.startDate,
+                    endDate: parameters.endDate,
+                    originBoardId: parameters.originBoardId,
+                    goal: parameters.goal,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -13962,7 +11623,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.BaseClient = void 0;
 const tslib_1 = __nccwpck_require__(89106);
 const authenticationService_1 = __nccwpck_require__(21432);
-const axios_1 = __nccwpck_require__(96545);
+const axios_1 = __nccwpck_require__(88757);
 const STRICT_GDPR_FLAG = 'x-atlassian-force-account-id';
 const ATLASSIAN_TOKEN_CHECK_FLAG = 'X-Atlassian-Token';
 const ATLASSIAN_TOKEN_CHECK_NOCHECK_VALUE = 'no-check';
@@ -13970,10 +11631,13 @@ class BaseClient {
     constructor(config) {
         var _a;
         this.config = config;
-        this.instance = axios_1.default.create(Object.assign(Object.assign({ paramsSerializer: this.paramSerializer.bind(this) }, config.baseRequestConfig), { baseURL: config.host, headers: this.removeUndefinedProperties(Object.assign({ [STRICT_GDPR_FLAG]: config.strictGDPR, [ATLASSIAN_TOKEN_CHECK_FLAG]: config.noCheckAtlassianToken ? ATLASSIAN_TOKEN_CHECK_NOCHECK_VALUE : undefined }, (_a = config.baseRequestConfig) === null || _a === void 0 ? void 0 : _a.headers)) }));
-        if (this.config.newErrorHandling === undefined) {
-            console.log('Jira.js: Deprecation warning: New error handling mechanism added. Please use `newErrorHandling: true` in config');
+        try {
+            new URL(config.host);
         }
+        catch (e) {
+            throw new Error("Couldn't parse the host URL. Perhaps you forgot to add 'http://' or 'https://' at the beginning of the URL?");
+        }
+        this.instance = axios_1.default.create(Object.assign(Object.assign({ paramsSerializer: this.paramSerializer.bind(this) }, config.baseRequestConfig), { baseURL: config.host, headers: this.removeUndefinedProperties(Object.assign({ [STRICT_GDPR_FLAG]: config.strictGDPR, [ATLASSIAN_TOKEN_CHECK_FLAG]: config.noCheckAtlassianToken ? ATLASSIAN_TOKEN_CHECK_NOCHECK_VALUE : undefined }, (_a = config.baseRequestConfig) === null || _a === void 0 ? void 0 : _a.headers)) }));
     }
     paramSerializer(parameters) {
         const parts = [];
@@ -14118,7 +11782,7 @@ var ClientType;
     ClientType["Version2"] = "version2";
     ClientType["Version3"] = "version3";
     ClientType["ServiceDesk"] = "serviceDesk";
-})(ClientType = exports.ClientType || (exports.ClientType = {}));
+})(ClientType || (exports.ClientType = ClientType = {}));
 function createClient(clientType, config) {
     switch (clientType) {
         case ClientType.Agile:
@@ -17102,7 +14766,7 @@ var AuthenticationService;
         });
     }
     AuthenticationService.getAuthenticationToken = getAuthenticationToken;
-})(AuthenticationService = exports.AuthenticationService || (exports.AuthenticationService = {}));
+})(AuthenticationService || (exports.AuthenticationService = AuthenticationService = {}));
 //# sourceMappingURL=authenticationService.js.map
 
 /***/ }),
@@ -17143,9 +14807,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.createJWTAuthentication = void 0;
 const jwt = __nccwpck_require__(24644);
 function createJWTAuthentication(authenticationData, requestData) {
+    var _a;
     const { method, url } = requestData;
     const now = Math.floor(Date.now() / 1000);
-    const expire = now + 180;
+    const expire = now + ((_a = authenticationData.expiryTimeSeconds) !== null && _a !== void 0 ? _a : 180);
     const request = jwt.fromMethodAndUrl(method, url);
     const tokenData = {
         iss: authenticationData.issuer,
@@ -17237,10 +14902,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Base64Encoder = void 0;
 var Base64Encoder;
 (function (Base64Encoder) {
-    const base64Sequence = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    const base64Sequence = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     const utf8Encode = (value) => {
-        value = value.replace(/\r\n/g, "\n");
-        let utftext = "";
+        value = value.replace(/\r\n/g, '\n');
+        let utftext = '';
         for (let n = 0; n < value.length; n++) {
             const c = value.charCodeAt(n);
             if (c < 128) {
@@ -17259,7 +14924,7 @@ var Base64Encoder;
         return utftext;
     };
     Base64Encoder.encode = (input) => {
-        let output = "";
+        let output = '';
         let chr1;
         let chr2;
         let chr3;
@@ -17287,7 +14952,7 @@ var Base64Encoder;
         }
         return output;
     };
-})(Base64Encoder = exports.Base64Encoder || (exports.Base64Encoder = {}));
+})(Base64Encoder || (exports.Base64Encoder = Base64Encoder = {}));
 //# sourceMappingURL=base64Encoder.js.map
 
 /***/ }),
@@ -17341,9 +15006,9 @@ class AnnouncementBanner {
                 url: '/rest/api/2/announcementBanner',
                 method: 'PUT',
                 data: {
-                    message: parameters.message,
                     isDismissible: parameters.isDismissible,
                     isEnabled: parameters.isEnabled,
+                    message: parameters.message,
                     visibility: parameters.visibility,
                 },
             };
@@ -17374,8 +15039,8 @@ class AppMigration {
                 url: '/rest/atlassian-connect/1/migration/field',
                 method: 'PUT',
                 headers: {
-                    'Atlassian-Transfer-Id': parameters.transferId,
                     'Atlassian-Account-Id': parameters.accountId,
+                    'Atlassian-Transfer-Id': parameters.transferId,
                 },
                 data: {
                     updateValueList: parameters.updateValueList,
@@ -17391,9 +15056,9 @@ class AppMigration {
                 url: `/rest/atlassian-connect/1/migration/properties/${parameters.entityType}`,
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Atlassian-Transfer-Id': parameters.transferId,
                     'Atlassian-Account-Id': parameters.accountId,
+                    'Atlassian-Transfer-Id': parameters.transferId,
+                    'Content-Type': 'application/json',
                 },
                 data: (_a = parameters.body) !== null && _a !== void 0 ? _a : parameters.entities,
             };
@@ -17409,9 +15074,9 @@ class AppMigration {
                     'Atlassian-Transfer-Id': parameters.transferId,
                 },
                 data: {
-                    workflowEntityId: parameters.workflowEntityId,
-                    ruleIds: parameters.ruleIds,
                     expand: parameters.expand,
+                    ruleIds: parameters.ruleIds,
+                    workflowEntityId: parameters.workflowEntityId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -17437,8 +15102,9 @@ class AppProperties {
     }
     getAddonProperties(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const addonKey = typeof parameters === 'string' ? parameters : parameters.addonKey;
             const config = {
-                url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties`,
+                url: `/rest/atlassian-connect/1/addons/${addonKey}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -17454,10 +15120,12 @@ class AppProperties {
         });
     }
     putAddonProperty(parameters, callback) {
+        var _a;
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: (_a = parameters.propertyValue) !== null && _a !== void 0 ? _a : parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -17466,6 +15134,26 @@ class AppProperties {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties/${parameters.propertyKey}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    putAppProperty(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            // todo
+            const config = {
+                url: `/rest/forge/1/app/properties/${parameters.propertyKey}`,
+                method: 'PUT',
+                data: parameters.propertyValue,
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteAppProperty(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/forge/1/app/properties/${parameters.propertyKey}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -17500,8 +15188,9 @@ class ApplicationRoles {
     }
     getApplicationRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters.key;
             const config = {
-                url: `/rest/api/2/applicationrole/${parameters.key}`,
+                url: `/rest/api/2/applicationrole/${key}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -17561,8 +15250,9 @@ class Avatars {
     }
     getAllSystemAvatars(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const type = typeof parameters === 'string' ? parameters : parameters.type;
             const config = {
-                url: `/rest/api/2/avatar/${parameters.type}/system`,
+                url: `/rest/api/2/avatar/${type}/system`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -17602,12 +15292,13 @@ class Avatars {
     }
     getAvatarImageByType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const type = typeof parameters === 'string' ? parameters : parameters.type;
             const config = {
-                url: `/rest/api/2/universal_avatar/view/type/${parameters.type}`,
+                url: `/rest/api/2/universal_avatar/view/type/${type}`,
                 method: 'GET',
                 params: {
-                    size: parameters.size,
-                    format: parameters.format,
+                    size: typeof parameters !== 'string' && parameters.size,
+                    format: typeof parameters !== 'string' && parameters.format,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -17716,7 +15407,9 @@ class Version2Client extends clients_1.BaseClient {
         this.jiraExpressions = new __1.JiraExpressions(this);
         this.jiraSettings = new __1.JiraSettings(this);
         this.jql = new __1.JQL(this);
+        this.jqlFunctionsApps = new __1.JqlFunctionsApps(this);
         this.labels = new __1.Labels(this);
+        this.licenseMetrics = new __1.LicenseMetrics(this);
         this.myself = new __1.Myself(this);
         this.permissions = new __1.Permissions(this);
         this.permissionSchemes = new __1.PermissionSchemes(this);
@@ -17911,6 +15604,10 @@ class Dashboards {
             const config = {
                 url: `/rest/api/2/dashboard/${parameters.dashboardId}/items/${parameters.itemId}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                data: parameters.body,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -17926,8 +15623,9 @@ class Dashboards {
     }
     getDashboard(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/dashboard/${parameters.id}`,
+                url: `/rest/api/2/dashboard/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -17950,8 +15648,9 @@ class Dashboards {
     }
     deleteDashboard(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/dashboard/${parameters.id}`,
+                url: `/rest/api/2/dashboard/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -18052,11 +15751,12 @@ class FilterSharing {
     }
     setDefaultShareScope(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const scope = typeof parameters === 'string' ? parameters : parameters.scope;
             const config = {
                 url: '/rest/api/2/filter/defaultShareScope',
                 method: 'PUT',
                 data: {
-                    scope: parameters === null || parameters === void 0 ? void 0 : parameters.scope,
+                    scope,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18064,8 +15764,9 @@ class FilterSharing {
     }
     getSharePermissions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}/permission`,
+                url: `/rest/api/2/filter/${id}/permission`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18216,12 +15917,13 @@ class Filters {
     }
     getFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}`,
+                url: `/rest/api/2/filter/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
-                    overrideSharePermissions: parameters.overrideSharePermissions,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    overrideSharePermissions: typeof parameters !== 'string' && parameters.overrideSharePermissions,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18249,8 +15951,9 @@ class Filters {
     }
     deleteFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}`,
+                url: `/rest/api/2/filter/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -18258,8 +15961,9 @@ class Filters {
     }
     getColumns(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}/columns`,
+                url: `/rest/api/2/filter/${id}/columns`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18270,6 +15974,7 @@ class Filters {
             const config = {
                 url: `/rest/api/2/filter/${parameters.id}/columns`,
                 method: 'PUT',
+                data: parameters.columns,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -18285,11 +15990,12 @@ class Filters {
     }
     setFavouriteForFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}/favourite`,
+                url: `/rest/api/2/filter/${id}/favourite`,
                 method: 'PUT',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18297,11 +16003,12 @@ class Filters {
     }
     deleteFavouriteForFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/filter/${parameters.id}/favourite`,
+                url: `/rest/api/2/filter/${id}/favourite`,
                 method: 'DELETE',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18424,6 +16131,8 @@ class Groups {
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
                     groupId: parameters === null || parameters === void 0 ? void 0 : parameters.groupId,
                     groupName: parameters === null || parameters === void 0 ? void 0 : parameters.groupName,
+                    accessType: parameters === null || parameters === void 0 ? void 0 : parameters.accessType,
+                    applicationKey: parameters === null || parameters === void 0 ? void 0 : parameters.applicationKey,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18488,6 +16197,7 @@ class Groups {
                     exclude: parameters === null || parameters === void 0 ? void 0 : parameters.exclude,
                     excludeId: parameters === null || parameters === void 0 ? void 0 : parameters.excludeId,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    caseInsensitive: parameters === null || parameters === void 0 ? void 0 : parameters.caseInsensitive,
                     userName: parameters === null || parameters === void 0 ? void 0 : parameters.userName,
                 },
             };
@@ -18509,15 +16219,15 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Version2Parameters = exports.Version2Models = void 0;
 const tslib_1 = __nccwpck_require__(89106);
 tslib_1.__exportStar(__nccwpck_require__(40589), exports);
+tslib_1.__exportStar(__nccwpck_require__(59379), exports);
 tslib_1.__exportStar(__nccwpck_require__(51774), exports);
 tslib_1.__exportStar(__nccwpck_require__(73034), exports);
-tslib_1.__exportStar(__nccwpck_require__(59379), exports);
 tslib_1.__exportStar(__nccwpck_require__(94065), exports);
 tslib_1.__exportStar(__nccwpck_require__(53060), exports);
 tslib_1.__exportStar(__nccwpck_require__(99586), exports);
 tslib_1.__exportStar(__nccwpck_require__(15304), exports);
-tslib_1.__exportStar(__nccwpck_require__(19455), exports);
 tslib_1.__exportStar(__nccwpck_require__(40894), exports);
+tslib_1.__exportStar(__nccwpck_require__(19455), exports);
 tslib_1.__exportStar(__nccwpck_require__(37741), exports);
 tslib_1.__exportStar(__nccwpck_require__(95934), exports);
 tslib_1.__exportStar(__nccwpck_require__(77584), exports);
@@ -18532,33 +16242,35 @@ tslib_1.__exportStar(__nccwpck_require__(19890), exports);
 tslib_1.__exportStar(__nccwpck_require__(30463), exports);
 tslib_1.__exportStar(__nccwpck_require__(64175), exports);
 tslib_1.__exportStar(__nccwpck_require__(64761), exports);
-tslib_1.__exportStar(__nccwpck_require__(62844), exports);
 tslib_1.__exportStar(__nccwpck_require__(94300), exports);
+tslib_1.__exportStar(__nccwpck_require__(62844), exports);
 tslib_1.__exportStar(__nccwpck_require__(42866), exports);
 tslib_1.__exportStar(__nccwpck_require__(53465), exports);
 tslib_1.__exportStar(__nccwpck_require__(87583), exports);
 tslib_1.__exportStar(__nccwpck_require__(93254), exports);
 tslib_1.__exportStar(__nccwpck_require__(63617), exports);
 tslib_1.__exportStar(__nccwpck_require__(30789), exports);
+tslib_1.__exportStar(__nccwpck_require__(65337), exports);
 tslib_1.__exportStar(__nccwpck_require__(19863), exports);
 tslib_1.__exportStar(__nccwpck_require__(15472), exports);
 tslib_1.__exportStar(__nccwpck_require__(43225), exports);
 tslib_1.__exportStar(__nccwpck_require__(81136), exports);
+tslib_1.__exportStar(__nccwpck_require__(31842), exports);
 tslib_1.__exportStar(__nccwpck_require__(98294), exports);
 tslib_1.__exportStar(__nccwpck_require__(69738), exports);
-tslib_1.__exportStar(__nccwpck_require__(31842), exports);
 tslib_1.__exportStar(__nccwpck_require__(68003), exports);
 tslib_1.__exportStar(__nccwpck_require__(314), exports);
 tslib_1.__exportStar(__nccwpck_require__(95465), exports);
 tslib_1.__exportStar(__nccwpck_require__(38114), exports);
-tslib_1.__exportStar(__nccwpck_require__(65337), exports);
-tslib_1.__exportStar(__nccwpck_require__(16622), exports);
 tslib_1.__exportStar(__nccwpck_require__(44577), exports);
 tslib_1.__exportStar(__nccwpck_require__(84651), exports);
+tslib_1.__exportStar(__nccwpck_require__(16622), exports);
+tslib_1.__exportStar(__nccwpck_require__(71497), exports);
 tslib_1.__exportStar(__nccwpck_require__(96767), exports);
+tslib_1.__exportStar(__nccwpck_require__(77856), exports);
 tslib_1.__exportStar(__nccwpck_require__(66992), exports);
-tslib_1.__exportStar(__nccwpck_require__(56540), exports);
 tslib_1.__exportStar(__nccwpck_require__(54254), exports);
+tslib_1.__exportStar(__nccwpck_require__(56540), exports);
 tslib_1.__exportStar(__nccwpck_require__(22403), exports);
 tslib_1.__exportStar(__nccwpck_require__(57439), exports);
 tslib_1.__exportStar(__nccwpck_require__(84121), exports);
@@ -18569,22 +16281,23 @@ tslib_1.__exportStar(__nccwpck_require__(54753), exports);
 tslib_1.__exportStar(__nccwpck_require__(89843), exports);
 tslib_1.__exportStar(__nccwpck_require__(39798), exports);
 tslib_1.__exportStar(__nccwpck_require__(83669), exports);
+tslib_1.__exportStar(__nccwpck_require__(73652), exports);
 tslib_1.__exportStar(__nccwpck_require__(47704), exports);
 tslib_1.__exportStar(__nccwpck_require__(23898), exports);
-tslib_1.__exportStar(__nccwpck_require__(73652), exports);
+tslib_1.__exportStar(__nccwpck_require__(57638), exports);
 tslib_1.__exportStar(__nccwpck_require__(22311), exports);
 tslib_1.__exportStar(__nccwpck_require__(93122), exports);
 tslib_1.__exportStar(__nccwpck_require__(60932), exports);
-tslib_1.__exportStar(__nccwpck_require__(57638), exports);
 tslib_1.__exportStar(__nccwpck_require__(68655), exports);
 tslib_1.__exportStar(__nccwpck_require__(22776), exports);
 tslib_1.__exportStar(__nccwpck_require__(22701), exports);
 tslib_1.__exportStar(__nccwpck_require__(47579), exports);
 tslib_1.__exportStar(__nccwpck_require__(90113), exports);
 tslib_1.__exportStar(__nccwpck_require__(52189), exports);
-tslib_1.__exportStar(__nccwpck_require__(98583), exports);
 tslib_1.__exportStar(__nccwpck_require__(60854), exports);
+tslib_1.__exportStar(__nccwpck_require__(98583), exports);
 tslib_1.__exportStar(__nccwpck_require__(86060), exports);
+tslib_1.__exportStar(__nccwpck_require__(93584), exports);
 tslib_1.__exportStar(__nccwpck_require__(17858), exports);
 tslib_1.__exportStar(__nccwpck_require__(20424), exports);
 tslib_1.__exportStar(__nccwpck_require__(35307), exports);
@@ -18592,7 +16305,6 @@ tslib_1.__exportStar(__nccwpck_require__(50685), exports);
 tslib_1.__exportStar(__nccwpck_require__(8782), exports);
 tslib_1.__exportStar(__nccwpck_require__(78481), exports);
 tslib_1.__exportStar(__nccwpck_require__(98887), exports);
-tslib_1.__exportStar(__nccwpck_require__(93584), exports);
 exports.Version2Models = __nccwpck_require__(7713);
 exports.Version2Parameters = __nccwpck_require__(74874);
 tslib_1.__exportStar(__nccwpck_require__(69218), exports);
@@ -18713,11 +16425,12 @@ class IssueAttachments {
     }
     getAttachmentContent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/content/${parameters.id}`,
+                url: `/rest/api/2/attachment/content/${id}`,
                 method: 'GET',
                 params: {
-                    redirect: parameters.redirect,
+                    redirect: typeof parameters !== 'string' && parameters.redirect,
                 },
                 responseType: 'arraybuffer',
             };
@@ -18735,14 +16448,15 @@ class IssueAttachments {
     }
     getAttachmentThumbnail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/thumbnail/${parameters.id}`,
+                url: `/rest/api/2/attachment/thumbnail/${id}`,
                 method: 'GET',
                 params: {
-                    redirect: parameters.redirect,
-                    fallbackToDefault: parameters.fallbackToDefault,
-                    width: parameters.width,
-                    height: parameters.height,
+                    redirect: typeof parameters !== 'string' && parameters.redirect,
+                    fallbackToDefault: typeof parameters !== 'string' && parameters.fallbackToDefault,
+                    width: typeof parameters !== 'string' && parameters.width,
+                    height: typeof parameters !== 'string' && parameters.height,
                 },
                 responseType: 'arraybuffer',
             };
@@ -18751,8 +16465,9 @@ class IssueAttachments {
     }
     getAttachment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/${parameters.id}`,
+                url: `/rest/api/2/attachment/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18760,8 +16475,9 @@ class IssueAttachments {
     }
     removeAttachment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/${parameters.id}`,
+                url: `/rest/api/2/attachment/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -18769,8 +16485,9 @@ class IssueAttachments {
     }
     expandAttachmentForHumans(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/${parameters.id}/expand/human`,
+                url: `/rest/api/2/attachment/${id}/expand/human`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18778,8 +16495,9 @@ class IssueAttachments {
     }
     expandAttachmentForMachines(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/attachment/${parameters.id}/expand/raw`,
+                url: `/rest/api/2/attachment/${id}/expand/raw`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18822,8 +16540,9 @@ class IssueCommentProperties {
     }
     getCommentPropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const commentId = typeof parameters === 'string' ? parameters : parameters.commentId;
             const config = {
-                url: `/rest/api/2/comment/${parameters.commentId}/properties`,
+                url: `/rest/api/2/comment/${commentId}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -18843,6 +16562,7 @@ class IssueCommentProperties {
             const config = {
                 url: `/rest/api/2/comment/${parameters.commentId}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -18880,10 +16600,10 @@ class IssueComments {
                 url: '/rest/api/2/comment/list',
                 method: 'POST',
                 params: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                    expand: parameters.expand,
                 },
                 data: {
-                    ids: parameters === null || parameters === void 0 ? void 0 : parameters.ids,
+                    ids: parameters.ids,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -18891,14 +16611,15 @@ class IssueComments {
     }
     getComments(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/comment`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/comment`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    orderBy: parameters.orderBy,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    orderBy: typeof parameters !== 'string' && parameters.orderBy,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19039,15 +16760,16 @@ class IssueCustomFieldContexts {
     }
     getContextsForField(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldId}/context`,
+                url: `/rest/api/2/field/${fieldId}/context`,
                 method: 'GET',
                 params: {
-                    isAnyIssueType: parameters.isAnyIssueType,
-                    isGlobalContext: parameters.isGlobalContext,
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    isAnyIssueType: typeof parameters !== 'string' && parameters.isAnyIssueType,
+                    isGlobalContext: typeof parameters !== 'string' && parameters.isGlobalContext,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19071,13 +16793,14 @@ class IssueCustomFieldContexts {
     }
     getDefaultValues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldId}/context/defaultValue`,
+                url: `/rest/api/2/field/${fieldId}/context/defaultValue`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19097,13 +16820,14 @@ class IssueCustomFieldContexts {
     }
     getIssueTypeMappingsForContexts(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldId}/context/issuetypemapping`,
+                url: `/rest/api/2/field/${fieldId}/context/issuetypemapping`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19127,13 +16851,14 @@ class IssueCustomFieldContexts {
     }
     getProjectContextMapping(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldId}/context/projectmapping`,
+                url: `/rest/api/2/field/${fieldId}/context/projectmapping`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19266,8 +16991,9 @@ class IssueCustomFieldOptions {
     }
     getCustomFieldOption(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/customFieldOption/${parameters.id}`,
+                url: `/rest/api/2/customFieldOption/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -19355,12 +17081,13 @@ class IssueCustomFieldOptionsApps {
     }
     getAllIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldKey}/option`,
+                url: `/rest/api/2/field/${fieldKey}/option`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19382,13 +17109,14 @@ class IssueCustomFieldOptionsApps {
     }
     getSelectableIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldKey}/option/suggestions/edit`,
+                url: `/rest/api/2/field/${fieldKey}/option/suggestions/edit`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    projectId: parameters.projectId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    projectId: typeof parameters !== 'string' && parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19396,13 +17124,14 @@ class IssueCustomFieldOptionsApps {
     }
     getVisibleIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldKey}/option/suggestions/search`,
+                url: `/rest/api/2/field/${fieldKey}/option/suggestions/search`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    projectId: parameters.projectId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    projectId: typeof parameters !== 'string' && parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19480,10 +17209,10 @@ class IssueCustomFieldValuesApps {
                 url: '/rest/api/2/app/field/value',
                 method: 'POST',
                 params: {
-                    generateChangelog: parameters === null || parameters === void 0 ? void 0 : parameters.generateChangelog,
+                    generateChangelog: parameters.generateChangelog,
                 },
                 data: {
-                    updates: parameters === null || parameters === void 0 ? void 0 : parameters.updates,
+                    updates: parameters.updates,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19566,8 +17295,9 @@ class IssueFieldConfigurations {
     }
     deleteFieldConfiguration(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/fieldconfiguration/${parameters.id}`,
+                url: `/rest/api/2/fieldconfiguration/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -19575,12 +17305,13 @@ class IssueFieldConfigurations {
     }
     getFieldConfigurationItems(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/fieldconfiguration/${parameters.id}/fields`,
+                url: `/rest/api/2/fieldconfiguration/${id}/fields`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19659,8 +17390,8 @@ class IssueFieldConfigurations {
                 url: '/rest/api/2/fieldconfigurationscheme/project',
                 method: 'PUT',
                 data: {
-                    fieldConfigurationSchemeId: parameters === null || parameters === void 0 ? void 0 : parameters.fieldConfigurationSchemeId,
-                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                    fieldConfigurationSchemeId: parameters.fieldConfigurationSchemeId,
+                    projectId: parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19681,8 +17412,9 @@ class IssueFieldConfigurations {
     }
     deleteFieldConfigurationScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/fieldconfigurationscheme/${parameters.id}`,
+                url: `/rest/api/2/fieldconfigurationscheme/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -19782,6 +17514,7 @@ class IssueFields {
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
                     id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
                     query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
+                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
                     orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
                 },
             };
@@ -19887,8 +17620,9 @@ class IssueLinkTypes {
     }
     getIssueLinkType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueLinkTypeId = typeof parameters === 'string' ? parameters : parameters.issueLinkTypeId;
             const config = {
-                url: `/rest/api/2/issueLinkType/${parameters.issueLinkTypeId}`,
+                url: `/rest/api/2/issueLinkType/${issueLinkTypeId}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -19912,8 +17646,9 @@ class IssueLinkTypes {
     }
     deleteIssueLinkType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueLinkTypeId = typeof parameters === 'string' ? parameters : parameters.issueLinkTypeId;
             const config = {
-                url: `/rest/api/2/issueLinkType/${parameters.issueLinkTypeId}`,
+                url: `/rest/api/2/issueLinkType/${issueLinkTypeId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -19943,10 +17678,10 @@ class IssueLinks {
                 url: '/rest/api/2/issueLink',
                 method: 'POST',
                 data: {
-                    type: parameters === null || parameters === void 0 ? void 0 : parameters.type,
-                    inwardIssue: parameters === null || parameters === void 0 ? void 0 : parameters.inwardIssue,
-                    outwardIssue: parameters === null || parameters === void 0 ? void 0 : parameters.outwardIssue,
-                    comment: parameters === null || parameters === void 0 ? void 0 : parameters.comment,
+                    type: parameters.type,
+                    inwardIssue: parameters.inwardIssue,
+                    outwardIssue: parameters.outwardIssue,
+                    comment: parameters.comment,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -19954,8 +17689,9 @@ class IssueLinks {
     }
     getIssueLink(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const linkId = typeof parameters === 'string' ? parameters : parameters.linkId;
             const config = {
-                url: `/rest/api/2/issueLink/${parameters.linkId}`,
+                url: `/rest/api/2/issueLink/${linkId}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -19963,8 +17699,9 @@ class IssueLinks {
     }
     deleteIssueLink(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const linkId = typeof parameters === 'string' ? parameters : parameters.linkId;
             const config = {
-                url: `/rest/api/2/issueLink/${parameters.linkId}`,
+                url: `/rest/api/2/issueLink/${linkId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -20032,7 +17769,39 @@ class IssueNotificationSchemes {
                 params: {
                     startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
                     expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    createNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/notificationscheme',
+                method: 'POST',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                    notificationSchemeEvents: parameters.notificationSchemeEvents,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getNotificationSchemeToProjectMappings(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/notificationscheme/project',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    notificationSchemeId: parameters === null || parameters === void 0 ? void 0 : parameters.notificationSchemeId,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20040,12 +17809,56 @@ class IssueNotificationSchemes {
     }
     getNotificationScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/notificationscheme/${parameters.id}`,
+                url: `/rest/api/2/notificationscheme/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/notificationscheme/${parameters.id}`,
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addNotifications(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/notificationscheme/${parameters.id}/notification`,
+                method: 'PUT',
+                data: {
+                    notificationSchemeEvents: parameters.notificationSchemeEvents,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/notificationscheme/${parameters.notificationSchemeId}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeNotificationFromNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/notificationscheme/${parameters.notificationSchemeId}/notification/${parameters.notificationId}`,
+                method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
         });
@@ -20104,6 +17917,20 @@ class IssuePriorities {
             return this.client.sendRequest(config, callback);
         });
     }
+    movePriorities(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/priority/move',
+                method: 'PUT',
+                data: {
+                    ids: parameters.ids,
+                    after: parameters.after,
+                    position: parameters.position,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     searchPriorities(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
@@ -20121,8 +17948,9 @@ class IssuePriorities {
     }
     getPriority(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/priority/${parameters.id}`,
+                url: `/rest/api/2/priority/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -20138,6 +17966,19 @@ class IssuePriorities {
                     description: parameters.description,
                     iconUrl: parameters.iconUrl,
                     statusColor: parameters.statusColor,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deletePriority(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/priority/${parameters.id}`,
+                method: 'DELETE',
+                params: {
+                    newPriority: parameters.newPriority,
+                    replaceWith: parameters.replaceWith,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20215,8 +18056,9 @@ class IssueProperties {
     }
     getIssuePropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/properties`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -20236,6 +18078,7 @@ class IssueProperties {
             const config = {
                 url: `/rest/api/2/issue/${parameters.issueIdOrKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.propertyValue,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -20269,11 +18112,12 @@ class IssueRemoteLinks {
     }
     getRemoteIssueLinks(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/remotelink`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/remotelink`,
                 method: 'GET',
                 params: {
-                    globalId: parameters.globalId,
+                    globalId: typeof parameters !== 'string' && parameters.globalId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20296,11 +18140,12 @@ class IssueRemoteLinks {
     }
     deleteRemoteIssueLinkByGlobalId(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/remotelink`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/remotelink`,
                 method: 'DELETE',
                 params: {
-                    globalId: parameters.globalId,
+                    globalId: typeof parameters !== 'string' && parameters.globalId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20366,11 +18211,85 @@ class IssueResolutions {
             return this.client.sendRequest(config, callback);
         });
     }
+    createResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/resolution',
+                method: 'POST',
+                data: parameters,
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    setDefaultResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/resolution/default',
+                method: 'PUT',
+                data: {
+                    id: parameters.id,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    moveResolutions(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/resolution/move',
+                method: 'PUT',
+                data: {
+                    ids: parameters.ids,
+                    after: parameters.after,
+                    position: parameters.position,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchResolutions(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/resolution/search',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     getResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
+            const config = {
+                url: `/rest/api/2/resolution/${id}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateResolution(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/api/2/resolution/${parameters.id}`,
-                method: 'GET',
+                method: 'PUT',
+                data: Object.assign(Object.assign({}, parameters), { name: parameters.name, description: parameters.description, id: undefined }),
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/resolution/${parameters.id}`,
+                method: 'DELETE',
+                params: {
+                    replaceWith: parameters.replaceWith,
+                },
             };
             return this.client.sendRequest(config, callback);
         });
@@ -20481,14 +18400,15 @@ class IssueSecurityLevel {
     }
     getIssueSecurityLevelMembers(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueSecuritySchemeId = typeof parameters === 'string' ? parameters : parameters.issueSecuritySchemeId;
             const config = {
-                url: `/rest/api/2/issuesecurityschemes/${parameters.issueSecuritySchemeId}/members`,
+                url: `/rest/api/2/issuesecurityschemes/${issueSecuritySchemeId}/members`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    issueSecurityLevelId: parameters.issueSecurityLevelId,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    issueSecurityLevelId: typeof parameters !== 'string' && parameters.issueSecurityLevelId,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20496,8 +18416,9 @@ class IssueSecurityLevel {
     }
     getIssueSecurityLevel(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/securitylevel/${parameters.id}`,
+                url: `/rest/api/2/securitylevel/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -20517,6 +18438,7 @@ exports.IssueSecurityLevel = IssueSecurityLevel;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.IssueSecuritySchemes = void 0;
 const tslib_1 = __nccwpck_require__(89106);
+const paramSerializer_1 = __nccwpck_require__(52517);
 class IssueSecuritySchemes {
     constructor(client) {
         this.client = client;
@@ -20530,11 +18452,181 @@ class IssueSecuritySchemes {
             return this.client.sendRequest(config, callback);
         });
     }
+    createIssueSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes',
+                method: 'POST',
+                data: {
+                    description: parameters.description,
+                    levels: parameters.levels,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getSecurityLevels(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes/level',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: (0, paramSerializer_1.paramSerializer)('id', parameters === null || parameters === void 0 ? void 0 : parameters.id),
+                    schemeId: (0, paramSerializer_1.paramSerializer)('schemeId', parameters === null || parameters === void 0 ? void 0 : parameters.schemeId),
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    setDefaultLevels(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes/level/default',
+                method: 'PUT',
+                data: {
+                    defaultValues: parameters === null || parameters === void 0 ? void 0 : parameters.defaultValues,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getSecurityLevelMembers(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes/level/member',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: (0, paramSerializer_1.paramSerializer)('id', parameters === null || parameters === void 0 ? void 0 : parameters.id),
+                    schemeId: (0, paramSerializer_1.paramSerializer)('schemeId', parameters === null || parameters === void 0 ? void 0 : parameters.schemeId),
+                    levelId: (0, paramSerializer_1.paramSerializer)('levelId', parameters === null || parameters === void 0 ? void 0 : parameters.levelId),
+                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchProjectsUsingSecuritySchemes(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes/project',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    issueSecuritySchemeId: parameters === null || parameters === void 0 ? void 0 : parameters.issueSecuritySchemeId,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchSecuritySchemes(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/issuesecurityschemes/search',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: (0, paramSerializer_1.paramSerializer)('id', parameters === null || parameters === void 0 ? void 0 : parameters.id),
+                    projectId: (0, paramSerializer_1.paramSerializer)('projectId', parameters === null || parameters === void 0 ? void 0 : parameters.projectId),
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     getIssueSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${id}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateIssueSecurityScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/api/2/issuesecurityschemes/${parameters.id}`,
-                method: 'GET',
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}/level`,
+                method: 'PUT',
+                data: {
+                    levels: parameters.levels,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}`,
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}`,
+                method: 'DELETE',
+                params: {
+                    replaceWith: parameters.replaceWith,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addSecurityLevelMembers(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}/member`,
+                method: 'PUT',
+                data: {
+                    members: parameters.members,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeMemberFromSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}/member/${parameters.memberId}`,
+                method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
         });
@@ -20559,8 +18651,9 @@ class IssueTypeProperties {
     }
     getIssueTypePropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueTypeId = typeof parameters === 'string' ? parameters : parameters.issueTypeId;
             const config = {
-                url: `/rest/api/2/issuetype/${parameters.issueTypeId}/properties`,
+                url: `/rest/api/2/issuetype/${issueTypeId}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -20580,6 +18673,7 @@ class IssueTypeProperties {
             const config = {
                 url: `/rest/api/2/issuetype/${parameters.issueTypeId}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.body,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -20700,8 +18794,9 @@ class IssueTypeSchemes {
     }
     deleteIssueTypeScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueTypeSchemeId = typeof parameters === 'string' ? parameters : parameters.issueTypeSchemeId;
             const config = {
-                url: `/rest/api/2/issuetypescheme/${parameters.issueTypeSchemeId}`,
+                url: `/rest/api/2/issuetypescheme/${issueTypeSchemeId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -20847,8 +18942,9 @@ class IssueTypeScreenSchemes {
     }
     deleteIssueTypeScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueTypeScreenSchemeId = typeof parameters === 'string' ? parameters : parameters.issueTypeScreenSchemeId;
             const config = {
-                url: `/rest/api/2/issuetypescreenscheme/${parameters.issueTypeScreenSchemeId}`,
+                url: `/rest/api/2/issuetypescreenscheme/${issueTypeScreenSchemeId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -20892,13 +18988,14 @@ class IssueTypeScreenSchemes {
     }
     getProjectsForIssueTypeScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueTypeScreenSchemeId = typeof parameters === 'string' ? parameters : parameters.issueTypeScreenSchemeId;
             const config = {
-                url: `/rest/api/2/issuetypescreenscheme/${parameters.issueTypeScreenSchemeId}/project`,
+                url: `/rest/api/2/issuetypescreenscheme/${issueTypeScreenSchemeId}/project`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    query: parameters.query,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    query: typeof parameters !== 'string' && parameters.query,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20961,8 +19058,9 @@ class IssueTypes {
     }
     getIssueType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/issuetype/${parameters.id}`,
+                url: `/rest/api/2/issuetype/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -20984,11 +19082,12 @@ class IssueTypes {
     }
     deleteIssueType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/issuetype/${parameters.id}`,
+                url: `/rest/api/2/issuetype/${id}`,
                 method: 'DELETE',
                 params: {
-                    alternativeIssueTypeId: parameters.alternativeIssueTypeId,
+                    alternativeIssueTypeId: typeof parameters !== 'string' && parameters.alternativeIssueTypeId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -20996,8 +19095,9 @@ class IssueTypes {
     }
     getAlternativeIssueTypes(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/issuetype/${parameters.id}/alternatives`,
+                url: `/rest/api/2/issuetype/${id}/alternatives`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -21037,8 +19137,9 @@ class IssueVotes {
     }
     getVotes(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/votes`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/votes`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -21046,8 +19147,9 @@ class IssueVotes {
     }
     addVote(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/votes`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/votes`,
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -21058,8 +19160,9 @@ class IssueVotes {
     }
     removeVote(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/votes`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/votes`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -21097,8 +19200,9 @@ class IssueWatchers {
     }
     getIssueWatchers(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/watchers`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/watchers`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -21204,15 +19308,16 @@ class IssueWorklogs {
     }
     getIssueWorklog(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/worklog`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/worklog`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    startedAfter: parameters.startedAfter,
-                    startedBefore: parameters.startedBefore,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    startedAfter: typeof parameters !== 'string' && parameters.startedAfter,
+                    startedBefore: typeof parameters !== 'string' && parameters.startedBefore,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21375,14 +19480,14 @@ class Issues {
                 url: '/rest/api/2/issue',
                 method: 'POST',
                 params: {
-                    updateHistory: parameters === null || parameters === void 0 ? void 0 : parameters.updateHistory,
+                    updateHistory: parameters.updateHistory,
                 },
                 data: {
-                    transition: parameters === null || parameters === void 0 ? void 0 : parameters.transition,
-                    fields: parameters === null || parameters === void 0 ? void 0 : parameters.fields,
-                    update: parameters === null || parameters === void 0 ? void 0 : parameters.update,
-                    historyMetadata: parameters === null || parameters === void 0 ? void 0 : parameters.historyMetadata,
-                    properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
+                    transition: parameters.transition,
+                    fields: parameters.fields,
+                    update: parameters.update,
+                    historyMetadata: parameters.historyMetadata,
+                    properties: parameters.properties,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21418,15 +19523,16 @@ class Issues {
     }
     getIssue(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}`,
+                url: `/rest/api/2/issue/${issueIdOrKey}`,
                 method: 'GET',
                 params: {
-                    fields: parameters.fields,
-                    fieldsByKeys: parameters.fieldsByKeys,
-                    expand: parameters.expand,
-                    properties: parameters.properties,
-                    updateHistory: parameters.updateHistory,
+                    fields: typeof parameters !== 'string' && parameters.fields,
+                    fieldsByKeys: typeof parameters !== 'string' && parameters.fieldsByKeys,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    properties: typeof parameters !== 'string' && parameters.properties,
+                    updateHistory: typeof parameters !== 'string' && parameters.updateHistory,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21455,11 +19561,12 @@ class Issues {
     }
     deleteIssue(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}`,
+                url: `/rest/api/2/issue/${issueIdOrKey}`,
                 method: 'DELETE',
                 params: {
-                    deleteSubtasks: parameters.deleteSubtasks,
+                    deleteSubtasks: typeof parameters !== 'string' && parameters.deleteSubtasks,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21492,12 +19599,13 @@ class Issues {
     }
     getChangeLogs(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/changelog`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/changelog`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21517,12 +19625,13 @@ class Issues {
     }
     getEditIssueMeta(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/editmeta`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/editmeta`,
                 method: 'GET',
                 params: {
-                    overrideScreenSecurity: parameters.overrideScreenSecurity,
-                    overrideEditableFlag: parameters.overrideEditableFlag,
+                    overrideScreenSecurity: typeof parameters !== 'string' && parameters.overrideScreenSecurity,
+                    overrideEditableFlag: typeof parameters !== 'string' && parameters.overrideEditableFlag,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21546,15 +19655,16 @@ class Issues {
     }
     getTransitions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/2/issue/${parameters.issueIdOrKey}/transitions`,
+                url: `/rest/api/2/issue/${issueIdOrKey}/transitions`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
-                    transitionId: parameters.transitionId,
-                    skipRemoteOnlyCondition: parameters.skipRemoteOnlyCondition,
-                    includeUnavailableTransitions: parameters.includeUnavailableTransitions,
-                    sortByOpsBarAndStatus: parameters.sortByOpsBarAndStatus,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    transitionId: typeof parameters !== 'string' && parameters.transitionId,
+                    skipRemoteOnlyCondition: typeof parameters !== 'string' && parameters.skipRemoteOnlyCondition,
+                    includeUnavailableTransitions: typeof parameters !== 'string' && parameters.includeUnavailableTransitions,
+                    sortByOpsBarAndStatus: typeof parameters !== 'string' && parameters.sortByOpsBarAndStatus,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21609,8 +19719,8 @@ class JQL {
                 url: '/rest/api/2/jql/autocompletedata',
                 method: 'POST',
                 data: {
-                    projectIds: parameters === null || parameters === void 0 ? void 0 : parameters.projectIds,
                     includeCollapsedFields: parameters === null || parameters === void 0 ? void 0 : parameters.includeCollapsedFields,
+                    projectIds: parameters === null || parameters === void 0 ? void 0 : parameters.projectIds,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21665,6 +19775,34 @@ class JQL {
                 method: 'POST',
                 data: {
                     queries: parameters === null || parameters === void 0 ? void 0 : parameters.queries,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getPrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/jql/function/computation',
+                method: 'GET',
+                params: {
+                    functionKey: parameters === null || parameters === void 0 ? void 0 : parameters.functionKey,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
+                    filter: parameters === null || parameters === void 0 ? void 0 : parameters.filter,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updatePrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/jql/function/computation',
+                method: 'POST',
+                data: {
+                    values: parameters.values,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -21786,6 +19924,52 @@ exports.JiraSettings = JiraSettings;
 
 /***/ }),
 
+/***/ 71497:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.JqlFunctionsApps = void 0;
+const tslib_1 = __nccwpck_require__(89106);
+class JqlFunctionsApps {
+    constructor(client) {
+        this.client = client;
+    }
+    getPrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/jql/function/computation',
+                method: 'GET',
+                params: {
+                    functionKey: parameters === null || parameters === void 0 ? void 0 : parameters.functionKey,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
+                    filter: parameters === null || parameters === void 0 ? void 0 : parameters.filter,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updatePrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/jql/function/computation',
+                method: 'POST',
+                data: {
+                    values: parameters === null || parameters === void 0 ? void 0 : parameters.values,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+}
+exports.JqlFunctionsApps = JqlFunctionsApps;
+//# sourceMappingURL=jqlFunctionsApps.js.map
+
+/***/ }),
+
 /***/ 96767:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -21814,6 +19998,42 @@ class Labels {
 }
 exports.Labels = Labels;
 //# sourceMappingURL=labels.js.map
+
+/***/ }),
+
+/***/ 77856:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LicenseMetrics = void 0;
+const tslib_1 = __nccwpck_require__(89106);
+class LicenseMetrics {
+    constructor(client) {
+        this.client = client;
+    }
+    getApproximateLicenseCount(callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/2/license/approximateLicenseCount',
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getApproximateApplicationLicenseCount(applicationKey, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/2/license/approximateLicenseCount/product/${applicationKey}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+}
+exports.LicenseMetrics = LicenseMetrics;
+//# sourceMappingURL=licenseMetrics.js.map
 
 /***/ }),
 
@@ -21854,6 +20074,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=addGroup.js.map
+
+/***/ }),
+
+/***/ 58284:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addNotificationsDetails.js.map
+
+/***/ }),
+
+/***/ 70286:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecuritySchemeLevelsRequest.js.map
 
 /***/ }),
 
@@ -22367,6 +20607,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 18222:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=containerForProjectFeatures.js.map
+
+/***/ }),
+
 /***/ 11363:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -22457,6 +20707,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 82961:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createIssueSecuritySchemeDetails.js.map
+
+/***/ }),
+
+/***/ 76423:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createNotificationSchemeDetails.js.map
+
+/***/ }),
+
 /***/ 27496:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -22474,6 +20744,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createProjectDetails.js.map
+
+/***/ }),
+
+/***/ 9742:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createResolutionDetails.js.map
 
 /***/ }),
 
@@ -22584,6 +20864,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createdIssues.js.map
+
+/***/ }),
+
+/***/ 83444:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=customContextVariable.js.map
 
 /***/ }),
 
@@ -22874,6 +21164,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=dashboardUser.js.map
+
+/***/ }),
+
+/***/ 59610:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=defaultLevelValue.js.map
 
 /***/ }),
 
@@ -23438,6 +21738,8 @@ tslib_1.__exportStar(__nccwpck_require__(54357), exports);
 tslib_1.__exportStar(__nccwpck_require__(93353), exports);
 tslib_1.__exportStar(__nccwpck_require__(23205), exports);
 tslib_1.__exportStar(__nccwpck_require__(59194), exports);
+tslib_1.__exportStar(__nccwpck_require__(58284), exports);
+tslib_1.__exportStar(__nccwpck_require__(70286), exports);
 tslib_1.__exportStar(__nccwpck_require__(21686), exports);
 tslib_1.__exportStar(__nccwpck_require__(89391), exports);
 tslib_1.__exportStar(__nccwpck_require__(14972), exports);
@@ -23489,6 +21791,7 @@ tslib_1.__exportStar(__nccwpck_require__(49410), exports);
 tslib_1.__exportStar(__nccwpck_require__(32264), exports);
 tslib_1.__exportStar(__nccwpck_require__(66433), exports);
 tslib_1.__exportStar(__nccwpck_require__(67177), exports);
+tslib_1.__exportStar(__nccwpck_require__(18222), exports);
 tslib_1.__exportStar(__nccwpck_require__(11363), exports);
 tslib_1.__exportStar(__nccwpck_require__(60790), exports);
 tslib_1.__exportStar(__nccwpck_require__(23634), exports);
@@ -23500,8 +21803,11 @@ tslib_1.__exportStar(__nccwpck_require__(32672), exports);
 tslib_1.__exportStar(__nccwpck_require__(97169), exports);
 tslib_1.__exportStar(__nccwpck_require__(50708), exports);
 tslib_1.__exportStar(__nccwpck_require__(20923), exports);
+tslib_1.__exportStar(__nccwpck_require__(82961), exports);
+tslib_1.__exportStar(__nccwpck_require__(76423), exports);
 tslib_1.__exportStar(__nccwpck_require__(27496), exports);
 tslib_1.__exportStar(__nccwpck_require__(60996), exports);
+tslib_1.__exportStar(__nccwpck_require__(9742), exports);
 tslib_1.__exportStar(__nccwpck_require__(39960), exports);
 tslib_1.__exportStar(__nccwpck_require__(69926), exports);
 tslib_1.__exportStar(__nccwpck_require__(60027), exports);
@@ -23511,6 +21817,7 @@ tslib_1.__exportStar(__nccwpck_require__(84306), exports);
 tslib_1.__exportStar(__nccwpck_require__(14844), exports);
 tslib_1.__exportStar(__nccwpck_require__(19813), exports);
 tslib_1.__exportStar(__nccwpck_require__(32634), exports);
+tslib_1.__exportStar(__nccwpck_require__(83444), exports);
 tslib_1.__exportStar(__nccwpck_require__(56168), exports);
 tslib_1.__exportStar(__nccwpck_require__(6892), exports);
 tslib_1.__exportStar(__nccwpck_require__(35898), exports);
@@ -23540,6 +21847,7 @@ tslib_1.__exportStar(__nccwpck_require__(68239), exports);
 tslib_1.__exportStar(__nccwpck_require__(88063), exports);
 tslib_1.__exportStar(__nccwpck_require__(42581), exports);
 tslib_1.__exportStar(__nccwpck_require__(48183), exports);
+tslib_1.__exportStar(__nccwpck_require__(59610), exports);
 tslib_1.__exportStar(__nccwpck_require__(28721), exports);
 tslib_1.__exportStar(__nccwpck_require__(61841), exports);
 tslib_1.__exportStar(__nccwpck_require__(57524), exports);
@@ -23621,6 +21929,7 @@ tslib_1.__exportStar(__nccwpck_require__(66759), exports);
 tslib_1.__exportStar(__nccwpck_require__(39044), exports);
 tslib_1.__exportStar(__nccwpck_require__(67782), exports);
 tslib_1.__exportStar(__nccwpck_require__(28957), exports);
+tslib_1.__exportStar(__nccwpck_require__(29651), exports);
 tslib_1.__exportStar(__nccwpck_require__(51687), exports);
 tslib_1.__exportStar(__nccwpck_require__(85195), exports);
 tslib_1.__exportStar(__nccwpck_require__(83958), exports);
@@ -23668,6 +21977,9 @@ tslib_1.__exportStar(__nccwpck_require__(46595), exports);
 tslib_1.__exportStar(__nccwpck_require__(31529), exports);
 tslib_1.__exportStar(__nccwpck_require__(6679), exports);
 tslib_1.__exportStar(__nccwpck_require__(85927), exports);
+tslib_1.__exportStar(__nccwpck_require__(20242), exports);
+tslib_1.__exportStar(__nccwpck_require__(56492), exports);
+tslib_1.__exportStar(__nccwpck_require__(2702), exports);
 tslib_1.__exportStar(__nccwpck_require__(57438), exports);
 tslib_1.__exportStar(__nccwpck_require__(15458), exports);
 tslib_1.__exportStar(__nccwpck_require__(55982), exports);
@@ -23688,6 +22000,7 @@ tslib_1.__exportStar(__nccwpck_require__(20316), exports);
 tslib_1.__exportStar(__nccwpck_require__(32977), exports);
 tslib_1.__exportStar(__nccwpck_require__(7320), exports);
 tslib_1.__exportStar(__nccwpck_require__(94929), exports);
+tslib_1.__exportStar(__nccwpck_require__(94725), exports);
 tslib_1.__exportStar(__nccwpck_require__(25164), exports);
 tslib_1.__exportStar(__nccwpck_require__(99113), exports);
 tslib_1.__exportStar(__nccwpck_require__(67032), exports);
@@ -23706,7 +22019,13 @@ tslib_1.__exportStar(__nccwpck_require__(8878), exports);
 tslib_1.__exportStar(__nccwpck_require__(6063), exports);
 tslib_1.__exportStar(__nccwpck_require__(14207), exports);
 tslib_1.__exportStar(__nccwpck_require__(78682), exports);
+tslib_1.__exportStar(__nccwpck_require__(2654), exports);
+tslib_1.__exportStar(__nccwpck_require__(11094), exports);
 tslib_1.__exportStar(__nccwpck_require__(2307), exports);
+tslib_1.__exportStar(__nccwpck_require__(85253), exports);
+tslib_1.__exportStar(__nccwpck_require__(46106), exports);
+tslib_1.__exportStar(__nccwpck_require__(38449), exports);
+tslib_1.__exportStar(__nccwpck_require__(7174), exports);
 tslib_1.__exportStar(__nccwpck_require__(64233), exports);
 tslib_1.__exportStar(__nccwpck_require__(14442), exports);
 tslib_1.__exportStar(__nccwpck_require__(97259), exports);
@@ -23735,6 +22054,7 @@ tslib_1.__exportStar(__nccwpck_require__(63536), exports);
 tslib_1.__exportStar(__nccwpck_require__(35293), exports);
 tslib_1.__exportStar(__nccwpck_require__(58233), exports);
 tslib_1.__exportStar(__nccwpck_require__(44337), exports);
+tslib_1.__exportStar(__nccwpck_require__(63065), exports);
 tslib_1.__exportStar(__nccwpck_require__(59637), exports);
 tslib_1.__exportStar(__nccwpck_require__(15273), exports);
 tslib_1.__exportStar(__nccwpck_require__(64682), exports);
@@ -23742,6 +22062,7 @@ tslib_1.__exportStar(__nccwpck_require__(14711), exports);
 tslib_1.__exportStar(__nccwpck_require__(79599), exports);
 tslib_1.__exportStar(__nccwpck_require__(17208), exports);
 tslib_1.__exportStar(__nccwpck_require__(82814), exports);
+tslib_1.__exportStar(__nccwpck_require__(31028), exports);
 tslib_1.__exportStar(__nccwpck_require__(46605), exports);
 tslib_1.__exportStar(__nccwpck_require__(58961), exports);
 tslib_1.__exportStar(__nccwpck_require__(13469), exports);
@@ -23751,9 +22072,13 @@ tslib_1.__exportStar(__nccwpck_require__(23493), exports);
 tslib_1.__exportStar(__nccwpck_require__(59235), exports);
 tslib_1.__exportStar(__nccwpck_require__(37886), exports);
 tslib_1.__exportStar(__nccwpck_require__(38913), exports);
+tslib_1.__exportStar(__nccwpck_require__(50603), exports);
 tslib_1.__exportStar(__nccwpck_require__(90737), exports);
 tslib_1.__exportStar(__nccwpck_require__(45777), exports);
 tslib_1.__exportStar(__nccwpck_require__(90419), exports);
+tslib_1.__exportStar(__nccwpck_require__(50899), exports);
+tslib_1.__exportStar(__nccwpck_require__(58725), exports);
+tslib_1.__exportStar(__nccwpck_require__(42374), exports);
 tslib_1.__exportStar(__nccwpck_require__(1196), exports);
 tslib_1.__exportStar(__nccwpck_require__(14918), exports);
 tslib_1.__exportStar(__nccwpck_require__(66182), exports);
@@ -23780,6 +22105,7 @@ tslib_1.__exportStar(__nccwpck_require__(63042), exports);
 tslib_1.__exportStar(__nccwpck_require__(15593), exports);
 tslib_1.__exportStar(__nccwpck_require__(27689), exports);
 tslib_1.__exportStar(__nccwpck_require__(56674), exports);
+tslib_1.__exportStar(__nccwpck_require__(27736), exports);
 tslib_1.__exportStar(__nccwpck_require__(52608), exports);
 tslib_1.__exportStar(__nccwpck_require__(60192), exports);
 tslib_1.__exportStar(__nccwpck_require__(19279), exports);
@@ -23818,7 +22144,10 @@ tslib_1.__exportStar(__nccwpck_require__(26421), exports);
 tslib_1.__exportStar(__nccwpck_require__(29314), exports);
 tslib_1.__exportStar(__nccwpck_require__(48512), exports);
 tslib_1.__exportStar(__nccwpck_require__(65954), exports);
+tslib_1.__exportStar(__nccwpck_require__(95737), exports);
+tslib_1.__exportStar(__nccwpck_require__(97517), exports);
 tslib_1.__exportStar(__nccwpck_require__(75335), exports);
+tslib_1.__exportStar(__nccwpck_require__(20212), exports);
 tslib_1.__exportStar(__nccwpck_require__(4705), exports);
 tslib_1.__exportStar(__nccwpck_require__(23181), exports);
 tslib_1.__exportStar(__nccwpck_require__(27376), exports);
@@ -23840,10 +22169,18 @@ tslib_1.__exportStar(__nccwpck_require__(3363), exports);
 tslib_1.__exportStar(__nccwpck_require__(24138), exports);
 tslib_1.__exportStar(__nccwpck_require__(62883), exports);
 tslib_1.__exportStar(__nccwpck_require__(940), exports);
+tslib_1.__exportStar(__nccwpck_require__(53511), exports);
 tslib_1.__exportStar(__nccwpck_require__(98116), exports);
+tslib_1.__exportStar(__nccwpck_require__(87470), exports);
+tslib_1.__exportStar(__nccwpck_require__(51166), exports);
+tslib_1.__exportStar(__nccwpck_require__(90457), exports);
+tslib_1.__exportStar(__nccwpck_require__(81475), exports);
 tslib_1.__exportStar(__nccwpck_require__(58692), exports);
+tslib_1.__exportStar(__nccwpck_require__(2273), exports);
 tslib_1.__exportStar(__nccwpck_require__(18913), exports);
+tslib_1.__exportStar(__nccwpck_require__(78959), exports);
 tslib_1.__exportStar(__nccwpck_require__(84703), exports);
+tslib_1.__exportStar(__nccwpck_require__(43324), exports);
 tslib_1.__exportStar(__nccwpck_require__(17745), exports);
 tslib_1.__exportStar(__nccwpck_require__(45021), exports);
 tslib_1.__exportStar(__nccwpck_require__(12837), exports);
@@ -23882,8 +22219,12 @@ tslib_1.__exportStar(__nccwpck_require__(13262), exports);
 tslib_1.__exportStar(__nccwpck_require__(53092), exports);
 tslib_1.__exportStar(__nccwpck_require__(32657), exports);
 tslib_1.__exportStar(__nccwpck_require__(96059), exports);
+tslib_1.__exportStar(__nccwpck_require__(18694), exports);
+tslib_1.__exportStar(__nccwpck_require__(56530), exports);
+tslib_1.__exportStar(__nccwpck_require__(64424), exports);
 tslib_1.__exportStar(__nccwpck_require__(84511), exports);
 tslib_1.__exportStar(__nccwpck_require__(13720), exports);
+tslib_1.__exportStar(__nccwpck_require__(49382), exports);
 tslib_1.__exportStar(__nccwpck_require__(54164), exports);
 tslib_1.__exportStar(__nccwpck_require__(81019), exports);
 tslib_1.__exportStar(__nccwpck_require__(37959), exports);
@@ -23907,6 +22248,7 @@ tslib_1.__exportStar(__nccwpck_require__(99403), exports);
 tslib_1.__exportStar(__nccwpck_require__(37024), exports);
 tslib_1.__exportStar(__nccwpck_require__(40757), exports);
 tslib_1.__exportStar(__nccwpck_require__(1985), exports);
+tslib_1.__exportStar(__nccwpck_require__(21690), exports);
 tslib_1.__exportStar(__nccwpck_require__(79516), exports);
 tslib_1.__exportStar(__nccwpck_require__(50937), exports);
 tslib_1.__exportStar(__nccwpck_require__(21839), exports);
@@ -24189,6 +22531,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=issueSecurityLevelMember.js.map
+
+/***/ }),
+
+/***/ 29651:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=issueSecuritySchemeToProjectMapping.js.map
 
 /***/ }),
 
@@ -24702,6 +23054,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 20242:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputation.js.map
+
+/***/ }),
+
+/***/ 56492:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputationUpdate.js.map
+
+/***/ }),
+
+/***/ 2702:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputationUpdateRequest.js.map
+
+/***/ }),
+
 /***/ 15458:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -24859,6 +23241,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=license.js.map
+
+/***/ }),
+
+/***/ 94725:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=licenseMetric.js.map
 
 /***/ }),
 
@@ -25052,6 +23444,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 2654:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeAndProjectMapping.js.map
+
+/***/ }),
+
+/***/ 11094:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeAndProjectMappingPage.js.map
+
+/***/ }),
+
 /***/ 2307:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -25059,6 +23471,46 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=notificationSchemeEvent.js.map
+
+/***/ }),
+
+/***/ 85253:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeEventDetails.js.map
+
+/***/ }),
+
+/***/ 46106:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeEventTypeId.js.map
+
+/***/ }),
+
+/***/ 38449:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeId.js.map
+
+/***/ }),
+
+/***/ 7174:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeNotificationDetails.js.map
 
 /***/ }),
 
@@ -25332,6 +23784,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 63065:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageIssueSecuritySchemeToProjectMapping.js.map
+
+/***/ }),
+
 /***/ 59637:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -25399,6 +23861,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=pageIssueTypeToContextMapping.js.map
+
+/***/ }),
+
+/***/ 31028:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageJqlFunctionPrecomputation.js.map
 
 /***/ }),
 
@@ -25492,6 +23964,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 50603:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageResolution.js.map
+
+/***/ }),
+
 /***/ 90737:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -25519,6 +24001,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=pageScreenWithTab.js.map
+
+/***/ }),
+
+/***/ 50899:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecurityLevel.js.map
+
+/***/ }),
+
+/***/ 58725:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecurityLevelMember.js.map
+
+/***/ }),
+
+/***/ 42374:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecuritySchemeWithProjects.js.map
 
 /***/ }),
 
@@ -25789,6 +24301,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=projectCategory.js.map
+
+/***/ }),
+
+/***/ 27736:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=projectComponent.js.map
 
 /***/ }),
 
@@ -26172,6 +24694,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 95737:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=reorderIssuePriorities.js.map
+
+/***/ }),
+
+/***/ 97517:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=reorderIssueResolutionsRequest.js.map
+
+/***/ }),
+
 /***/ 75335:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -26179,6 +24721,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=resolution.js.map
+
+/***/ }),
+
+/***/ 20212:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=resolutionId.js.map
 
 /***/ }),
 
@@ -26392,6 +24944,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 53511:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securityLevelMember.js.map
+
+/***/ }),
+
 /***/ 98116:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -26399,6 +24961,56 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=securityScheme.js.map
+
+/***/ }),
+
+/***/ 87470:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeId.js.map
+
+/***/ }),
+
+/***/ 51166:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeLevel.js.map
+
+/***/ }),
+
+/***/ 90457:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeLevelMember.js.map
+
+/***/ }),
+
+/***/ 81475:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeMembersRequest.js.map
+
+/***/ }),
+
+/***/ 2273:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeWithProjects.js.map
 
 /***/ }),
 
@@ -26422,6 +25034,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 78959:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultLevelsRequest.js.map
+
+/***/ }),
+
 /***/ 84703:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -26429,6 +25051,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=setDefaultPriorityRequest.js.map
+
+/***/ }),
+
+/***/ 43324:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultResolutionRequest.js.map
 
 /***/ }),
 
@@ -26802,6 +25434,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 18694:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecurityLevelDetails.js.map
+
+/***/ }),
+
+/***/ 56530:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecuritySchemeRequest.js.map
+
+/***/ }),
+
+/***/ 64424:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateNotificationSchemeDetails.js.map
+
+/***/ }),
+
 /***/ 84511:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -26819,6 +25481,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updateProjectDetails.js.map
+
+/***/ }),
+
+/***/ 49382:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateResolutionDetails.js.map
 
 /***/ }),
 
@@ -27059,6 +25731,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=votes.js.map
+
+/***/ }),
+
+/***/ 21690:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=warningCollection.js.map
 
 /***/ }),
 
@@ -27401,9 +26083,13 @@ class Myself {
             const config = {
                 url: '/rest/api/2/mypreferences',
                 method: 'PUT',
+                headers: {
+                    'Content-Type': typeof parameters.value === 'string' ? 'text/plain' : 'application/json',
+                },
                 params: {
                     key: parameters.key,
                 },
+                data: parameters.value,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -27538,6 +26224,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 75263:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addNotifications.js.map
+
+/***/ }),
+
 /***/ 42133:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -27565,6 +26261,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=addScreenTabField.js.map
+
+/***/ }),
+
+/***/ 15845:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecurityLevel.js.map
+
+/***/ }),
+
+/***/ 72176:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecurityLevelMembers.js.map
 
 /***/ }),
 
@@ -27968,6 +26684,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 50465:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createIssueSecurityScheme.js.map
+
+/***/ }),
+
 /***/ 67836:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -28015,6 +26741,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createIssues.js.map
+
+/***/ }),
+
+/***/ 46874:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createNotificationScheme.js.map
 
 /***/ }),
 
@@ -28095,6 +26831,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createProjectRole.js.map
+
+/***/ }),
+
+/***/ 17721:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createResolution.js.map
 
 /***/ }),
 
@@ -28225,6 +26971,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deleteAndReplaceVersion.js.map
+
+/***/ }),
+
+/***/ 63089:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteAppProperty.js.map
 
 /***/ }),
 
@@ -28498,6 +27254,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 87465:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteNotificationScheme.js.map
+
+/***/ }),
+
 /***/ 95968:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -28515,6 +27281,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deletePermissionSchemeEntity.js.map
+
+/***/ }),
+
+/***/ 17770:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deletePriority.js.map
 
 /***/ }),
 
@@ -28598,6 +27374,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 53167:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteResolution.js.map
+
+/***/ }),
+
 /***/ 86327:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -28625,6 +27411,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deleteScreenTab.js.map
+
+/***/ }),
+
+/***/ 54093:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteSecurityScheme.js.map
 
 /***/ }),
 
@@ -29444,7 +28240,7 @@ var GetCurrentUser;
         /** Returns the application roles the user is assigned to. */
         Expand["ApplicationRoles"] = "applicationRoles";
     })(Expand = GetCurrentUser.Expand || (GetCurrentUser.Expand = {}));
-})(GetCurrentUser = exports.GetCurrentUser || (exports.GetCurrentUser = {}));
+})(GetCurrentUser || (exports.GetCurrentUser = GetCurrentUser = {}));
 //# sourceMappingURL=getCurrentUser.js.map
 
 /***/ }),
@@ -29713,7 +28509,7 @@ var GetFiltersPaginated;
         /** Returns a URL to view the filter. */
         Expand["ViewUrl"] = "viewUrl";
     })(Expand = GetFiltersPaginated.Expand || (GetFiltersPaginated.Expand = {}));
-})(GetFiltersPaginated = exports.GetFiltersPaginated || (exports.GetFiltersPaginated = {}));
+})(GetFiltersPaginated || (exports.GetFiltersPaginated = GetFiltersPaginated = {}));
 //# sourceMappingURL=getFiltersPaginated.js.map
 
 /***/ }),
@@ -29795,7 +28591,7 @@ var GetIssue;
          */
         Expand["VersionedRepresentations"] = "versionedRepresentations";
     })(Expand = GetIssue.Expand || (GetIssue.Expand = {}));
-})(GetIssue = exports.GetIssue || (exports.GetIssue = {}));
+})(GetIssue || (exports.GetIssue = GetIssue = {}));
 //# sourceMappingURL=getIssue.js.map
 
 /***/ }),
@@ -30060,6 +28856,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 6518:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getNotificationSchemeToProjectMappings.js.map
+
+/***/ }),
+
 /***/ 43192:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -30127,6 +28933,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=getPermittedProjects.js.map
+
+/***/ }),
+
+/***/ 33313:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getPrecomputations.js.map
 
 /***/ }),
 
@@ -30358,7 +29174,7 @@ var GetRecent;
         /** Returns the project with all available expand options. */
         Expand["All"] = "*";
     })(Expand = GetRecent.Expand || (GetRecent.Expand = {}));
-})(GetRecent = exports.GetRecent || (exports.GetRecent = {}));
+})(GetRecent || (exports.GetRecent = GetRecent = {}));
 //# sourceMappingURL=getRecent.js.map
 
 /***/ }),
@@ -30420,6 +29236,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=getScreensForField.js.map
+
+/***/ }),
+
+/***/ 96874:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getSecurityLevelMembers.js.map
+
+/***/ }),
+
+/***/ 37406:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getSecurityLevels.js.map
 
 /***/ }),
 
@@ -30549,7 +29385,7 @@ var GetUser;
         /** Includes details of all the applications to which the user has access. */
         Expand["ApplicationRoles"] = "applicationRoles";
     })(Expand = GetUser.Expand || (GetUser.Expand = {}));
-})(GetUser = exports.GetUser || (exports.GetUser = {}));
+})(GetUser || (exports.GetUser = GetUser = {}));
 //# sourceMappingURL=getUser.js.map
 
 /***/ }),
@@ -30838,9 +29674,12 @@ tslib_1.__exportStar(__nccwpck_require__(94788), exports);
 tslib_1.__exportStar(__nccwpck_require__(81705), exports);
 tslib_1.__exportStar(__nccwpck_require__(49721), exports);
 tslib_1.__exportStar(__nccwpck_require__(52863), exports);
+tslib_1.__exportStar(__nccwpck_require__(75263), exports);
 tslib_1.__exportStar(__nccwpck_require__(42133), exports);
 tslib_1.__exportStar(__nccwpck_require__(9128), exports);
 tslib_1.__exportStar(__nccwpck_require__(34967), exports);
+tslib_1.__exportStar(__nccwpck_require__(15845), exports);
+tslib_1.__exportStar(__nccwpck_require__(72176), exports);
 tslib_1.__exportStar(__nccwpck_require__(21904), exports);
 tslib_1.__exportStar(__nccwpck_require__(53299), exports);
 tslib_1.__exportStar(__nccwpck_require__(11523), exports);
@@ -30882,10 +29721,12 @@ tslib_1.__exportStar(__nccwpck_require__(94382), exports);
 tslib_1.__exportStar(__nccwpck_require__(63056), exports);
 tslib_1.__exportStar(__nccwpck_require__(68183), exports);
 tslib_1.__exportStar(__nccwpck_require__(21124), exports);
+tslib_1.__exportStar(__nccwpck_require__(50465), exports);
 tslib_1.__exportStar(__nccwpck_require__(67836), exports);
 tslib_1.__exportStar(__nccwpck_require__(939), exports);
 tslib_1.__exportStar(__nccwpck_require__(82429), exports);
 tslib_1.__exportStar(__nccwpck_require__(95792), exports);
+tslib_1.__exportStar(__nccwpck_require__(46874), exports);
 tslib_1.__exportStar(__nccwpck_require__(68494), exports);
 tslib_1.__exportStar(__nccwpck_require__(31862), exports);
 tslib_1.__exportStar(__nccwpck_require__(83593), exports);
@@ -30894,6 +29735,7 @@ tslib_1.__exportStar(__nccwpck_require__(32580), exports);
 tslib_1.__exportStar(__nccwpck_require__(39553), exports);
 tslib_1.__exportStar(__nccwpck_require__(99698), exports);
 tslib_1.__exportStar(__nccwpck_require__(31931), exports);
+tslib_1.__exportStar(__nccwpck_require__(17721), exports);
 tslib_1.__exportStar(__nccwpck_require__(77124), exports);
 tslib_1.__exportStar(__nccwpck_require__(89521), exports);
 tslib_1.__exportStar(__nccwpck_require__(5061), exports);
@@ -30907,6 +29749,7 @@ tslib_1.__exportStar(__nccwpck_require__(26322), exports);
 tslib_1.__exportStar(__nccwpck_require__(74906), exports);
 tslib_1.__exportStar(__nccwpck_require__(43022), exports);
 tslib_1.__exportStar(__nccwpck_require__(24256), exports);
+tslib_1.__exportStar(__nccwpck_require__(63089), exports);
 tslib_1.__exportStar(__nccwpck_require__(53570), exports);
 tslib_1.__exportStar(__nccwpck_require__(45354), exports);
 tslib_1.__exportStar(__nccwpck_require__(26345), exports);
@@ -30934,8 +29777,10 @@ tslib_1.__exportStar(__nccwpck_require__(64195), exports);
 tslib_1.__exportStar(__nccwpck_require__(10680), exports);
 tslib_1.__exportStar(__nccwpck_require__(45103), exports);
 tslib_1.__exportStar(__nccwpck_require__(90462), exports);
+tslib_1.__exportStar(__nccwpck_require__(87465), exports);
 tslib_1.__exportStar(__nccwpck_require__(95968), exports);
 tslib_1.__exportStar(__nccwpck_require__(33916), exports);
+tslib_1.__exportStar(__nccwpck_require__(17770), exports);
 tslib_1.__exportStar(__nccwpck_require__(12043), exports);
 tslib_1.__exportStar(__nccwpck_require__(47150), exports);
 tslib_1.__exportStar(__nccwpck_require__(60439), exports);
@@ -30944,9 +29789,11 @@ tslib_1.__exportStar(__nccwpck_require__(65013), exports);
 tslib_1.__exportStar(__nccwpck_require__(70808), exports);
 tslib_1.__exportStar(__nccwpck_require__(99272), exports);
 tslib_1.__exportStar(__nccwpck_require__(26186), exports);
+tslib_1.__exportStar(__nccwpck_require__(53167), exports);
 tslib_1.__exportStar(__nccwpck_require__(86327), exports);
 tslib_1.__exportStar(__nccwpck_require__(89424), exports);
 tslib_1.__exportStar(__nccwpck_require__(4678), exports);
+tslib_1.__exportStar(__nccwpck_require__(54093), exports);
 tslib_1.__exportStar(__nccwpck_require__(8353), exports);
 tslib_1.__exportStar(__nccwpck_require__(95752), exports);
 tslib_1.__exportStar(__nccwpck_require__(83989), exports);
@@ -31085,12 +29932,14 @@ tslib_1.__exportStar(__nccwpck_require__(58327), exports);
 tslib_1.__exportStar(__nccwpck_require__(39821), exports);
 tslib_1.__exportStar(__nccwpck_require__(45809), exports);
 tslib_1.__exportStar(__nccwpck_require__(43192), exports);
+tslib_1.__exportStar(__nccwpck_require__(6518), exports);
 tslib_1.__exportStar(__nccwpck_require__(6689), exports);
 tslib_1.__exportStar(__nccwpck_require__(65279), exports);
 tslib_1.__exportStar(__nccwpck_require__(44575), exports);
 tslib_1.__exportStar(__nccwpck_require__(16417), exports);
 tslib_1.__exportStar(__nccwpck_require__(36540), exports);
 tslib_1.__exportStar(__nccwpck_require__(99182), exports);
+tslib_1.__exportStar(__nccwpck_require__(33313), exports);
 tslib_1.__exportStar(__nccwpck_require__(48198), exports);
 tslib_1.__exportStar(__nccwpck_require__(25546), exports);
 tslib_1.__exportStar(__nccwpck_require__(86084), exports);
@@ -31118,6 +29967,8 @@ tslib_1.__exportStar(__nccwpck_require__(17190), exports);
 tslib_1.__exportStar(__nccwpck_require__(2560), exports);
 tslib_1.__exportStar(__nccwpck_require__(81029), exports);
 tslib_1.__exportStar(__nccwpck_require__(84026), exports);
+tslib_1.__exportStar(__nccwpck_require__(96874), exports);
+tslib_1.__exportStar(__nccwpck_require__(37406), exports);
 tslib_1.__exportStar(__nccwpck_require__(8082), exports);
 tslib_1.__exportStar(__nccwpck_require__(7798), exports);
 tslib_1.__exportStar(__nccwpck_require__(96164), exports);
@@ -31127,6 +29978,7 @@ tslib_1.__exportStar(__nccwpck_require__(21629), exports);
 tslib_1.__exportStar(__nccwpck_require__(34182), exports);
 tslib_1.__exportStar(__nccwpck_require__(46119), exports);
 tslib_1.__exportStar(__nccwpck_require__(47479), exports);
+tslib_1.__exportStar(__nccwpck_require__(87422), exports);
 tslib_1.__exportStar(__nccwpck_require__(87422), exports);
 tslib_1.__exportStar(__nccwpck_require__(47866), exports);
 tslib_1.__exportStar(__nccwpck_require__(27230), exports);
@@ -31161,6 +30013,8 @@ tslib_1.__exportStar(__nccwpck_require__(30115), exports);
 tslib_1.__exportStar(__nccwpck_require__(77233), exports);
 tslib_1.__exportStar(__nccwpck_require__(28491), exports);
 tslib_1.__exportStar(__nccwpck_require__(97174), exports);
+tslib_1.__exportStar(__nccwpck_require__(93733), exports);
+tslib_1.__exportStar(__nccwpck_require__(18593), exports);
 tslib_1.__exportStar(__nccwpck_require__(10082), exports);
 tslib_1.__exportStar(__nccwpck_require__(56132), exports);
 tslib_1.__exportStar(__nccwpck_require__(46893), exports);
@@ -31169,6 +30023,7 @@ tslib_1.__exportStar(__nccwpck_require__(29866), exports);
 tslib_1.__exportStar(__nccwpck_require__(86745), exports);
 tslib_1.__exportStar(__nccwpck_require__(69620), exports);
 tslib_1.__exportStar(__nccwpck_require__(66291), exports);
+tslib_1.__exportStar(__nccwpck_require__(1937), exports);
 tslib_1.__exportStar(__nccwpck_require__(93656), exports);
 tslib_1.__exportStar(__nccwpck_require__(66453), exports);
 tslib_1.__exportStar(__nccwpck_require__(13579), exports);
@@ -31179,8 +30034,11 @@ tslib_1.__exportStar(__nccwpck_require__(41675), exports);
 tslib_1.__exportStar(__nccwpck_require__(9778), exports);
 tslib_1.__exportStar(__nccwpck_require__(15816), exports);
 tslib_1.__exportStar(__nccwpck_require__(59898), exports);
+tslib_1.__exportStar(__nccwpck_require__(55073), exports);
 tslib_1.__exportStar(__nccwpck_require__(50550), exports);
+tslib_1.__exportStar(__nccwpck_require__(22323), exports);
 tslib_1.__exportStar(__nccwpck_require__(56470), exports);
+tslib_1.__exportStar(__nccwpck_require__(42148), exports);
 tslib_1.__exportStar(__nccwpck_require__(60829), exports);
 tslib_1.__exportStar(__nccwpck_require__(43053), exports);
 tslib_1.__exportStar(__nccwpck_require__(20747), exports);
@@ -31202,6 +30060,9 @@ tslib_1.__exportStar(__nccwpck_require__(88306), exports);
 tslib_1.__exportStar(__nccwpck_require__(44747), exports);
 tslib_1.__exportStar(__nccwpck_require__(75920), exports);
 tslib_1.__exportStar(__nccwpck_require__(59889), exports);
+tslib_1.__exportStar(__nccwpck_require__(30803), exports);
+tslib_1.__exportStar(__nccwpck_require__(93893), exports);
+tslib_1.__exportStar(__nccwpck_require__(27595), exports);
 tslib_1.__exportStar(__nccwpck_require__(26109), exports);
 tslib_1.__exportStar(__nccwpck_require__(88868), exports);
 tslib_1.__exportStar(__nccwpck_require__(81931), exports);
@@ -31209,7 +30070,9 @@ tslib_1.__exportStar(__nccwpck_require__(43671), exports);
 tslib_1.__exportStar(__nccwpck_require__(8787), exports);
 tslib_1.__exportStar(__nccwpck_require__(55197), exports);
 tslib_1.__exportStar(__nccwpck_require__(32649), exports);
+tslib_1.__exportStar(__nccwpck_require__(36386), exports);
 tslib_1.__exportStar(__nccwpck_require__(56476), exports);
+tslib_1.__exportStar(__nccwpck_require__(83881), exports);
 tslib_1.__exportStar(__nccwpck_require__(79051), exports);
 tslib_1.__exportStar(__nccwpck_require__(4848), exports);
 tslib_1.__exportStar(__nccwpck_require__(26378), exports);
@@ -31252,11 +30115,14 @@ tslib_1.__exportStar(__nccwpck_require__(70774), exports);
 tslib_1.__exportStar(__nccwpck_require__(55813), exports);
 tslib_1.__exportStar(__nccwpck_require__(44476), exports);
 tslib_1.__exportStar(__nccwpck_require__(64239), exports);
+tslib_1.__exportStar(__nccwpck_require__(10617), exports);
 tslib_1.__exportStar(__nccwpck_require__(25232), exports);
 tslib_1.__exportStar(__nccwpck_require__(65036), exports);
 tslib_1.__exportStar(__nccwpck_require__(57761), exports);
 tslib_1.__exportStar(__nccwpck_require__(98611), exports);
+tslib_1.__exportStar(__nccwpck_require__(73078), exports);
 tslib_1.__exportStar(__nccwpck_require__(72924), exports);
+tslib_1.__exportStar(__nccwpck_require__(76022), exports);
 tslib_1.__exportStar(__nccwpck_require__(18444), exports);
 tslib_1.__exportStar(__nccwpck_require__(29295), exports);
 tslib_1.__exportStar(__nccwpck_require__(51149), exports);
@@ -31264,8 +30130,10 @@ tslib_1.__exportStar(__nccwpck_require__(8737), exports);
 tslib_1.__exportStar(__nccwpck_require__(75329), exports);
 tslib_1.__exportStar(__nccwpck_require__(82941), exports);
 tslib_1.__exportStar(__nccwpck_require__(36215), exports);
+tslib_1.__exportStar(__nccwpck_require__(3739), exports);
 tslib_1.__exportStar(__nccwpck_require__(61030), exports);
 tslib_1.__exportStar(__nccwpck_require__(58711), exports);
+tslib_1.__exportStar(__nccwpck_require__(31810), exports);
 tslib_1.__exportStar(__nccwpck_require__(19047), exports);
 tslib_1.__exportStar(__nccwpck_require__(15118), exports);
 tslib_1.__exportStar(__nccwpck_require__(1805), exports);
@@ -31318,6 +30186,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=migrateQueries.js.map
+
+/***/ }),
+
+/***/ 93733:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=movePriorities.js.map
+
+/***/ }),
+
+/***/ 18593:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=moveResolutions.js.map
 
 /***/ }),
 
@@ -31398,6 +30286,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=putAddonProperty.js.map
+
+/***/ }),
+
+/***/ 1937:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=putAppProperty.js.map
 
 /***/ }),
 
@@ -31501,6 +30399,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 55073:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeLevel.js.map
+
+/***/ }),
+
 /***/ 50550:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31511,6 +30419,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 22323:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeMemberFromSecurityLevel.js.map
+
+/***/ }),
+
 /***/ 56470:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31518,6 +30436,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=removeModules.js.map
+
+/***/ }),
+
+/***/ 42148:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeNotificationFromNotificationScheme.js.map
 
 /***/ }),
 
@@ -31731,6 +30659,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 30803:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchProjectsUsingSecuritySchemes.js.map
+
+/***/ }),
+
+/***/ 93893:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchResolutions.js.map
+
+/***/ }),
+
+/***/ 27595:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchSecuritySchemes.js.map
+
+/***/ }),
+
 /***/ 26109:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31801,6 +30759,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 36386:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultLevels.js.map
+
+/***/ }),
+
 /***/ 56476:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31808,6 +30776,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=setDefaultPriority.js.map
+
+/***/ }),
+
+/***/ 83881:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultResolution.js.map
 
 /***/ }),
 
@@ -32221,6 +31199,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 10617:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecurityScheme.js.map
+
+/***/ }),
+
 /***/ 25232:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -32261,6 +31249,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 73078:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateNotificationScheme.js.map
+
+/***/ }),
+
 /***/ 72924:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -32268,6 +31266,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updatePermissionScheme.js.map
+
+/***/ }),
+
+/***/ 76022:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updatePrecomputations.js.map
 
 /***/ }),
 
@@ -32341,6 +31349,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 3739:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateResolution.js.map
+
+/***/ }),
+
 /***/ 61030:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -32358,6 +31376,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updateScreenScheme.js.map
+
+/***/ }),
+
+/***/ 31810:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateSecurityLevel.js.map
 
 /***/ }),
 
@@ -32510,11 +31538,12 @@ class PermissionSchemes {
     }
     getPermissionScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const schemeId = typeof parameters === 'string' ? parameters : parameters.schemeId;
             const config = {
-                url: `/rest/api/2/permissionscheme/${parameters.schemeId}`,
+                url: `/rest/api/2/permissionscheme/${schemeId}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -32689,12 +31718,12 @@ class ProjectAvatars {
                 url: `/rest/api/2/project/${parameters.projectIdOrKey}/avatar`,
                 method: 'PUT',
                 data: {
-                    id: parameters.id,
-                    owner: parameters.owner,
-                    isSystemAvatar: parameters.isSystemAvatar,
-                    isSelected: parameters.isSelected,
-                    isDeletable: parameters.isDeletable,
                     fileName: parameters.fileName,
+                    id: parameters.id,
+                    isDeletable: parameters.isDeletable,
+                    isSelected: parameters.isSelected,
+                    isSystemAvatar: parameters.isSystemAvatar,
+                    owner: parameters.owner,
                     urls: parameters.urls,
                 },
             };
@@ -32720,14 +31749,16 @@ class ProjectAvatars {
                     y: parameters.y,
                     size: parameters.size,
                 },
+                data: parameters.avatar,
             };
             return this.client.sendRequest(config, callback);
         });
     }
     getAllProjectAvatars(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/avatars`,
+                url: `/rest/api/2/project/${projectIdOrKey}/avatars`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32766,10 +31797,10 @@ class ProjectCategories {
                 url: '/rest/api/2/projectCategory',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    description: parameters.description,
+                    id: parameters.id,
+                    name: parameters.name,
+                    self: parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -32777,8 +31808,9 @@ class ProjectCategories {
     }
     getProjectCategoryById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/projectCategory/${parameters.id}`,
+                url: `/rest/api/2/projectCategory/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32799,8 +31831,9 @@ class ProjectCategories {
     }
     removeProjectCategory(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/projectCategory/${parameters.id}`,
+                url: `/rest/api/2/projectCategory/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -32830,20 +31863,20 @@ class ProjectComponents {
                 url: '/rest/api/2/component',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    lead: parameters === null || parameters === void 0 ? void 0 : parameters.lead,
-                    leadUserName: parameters === null || parameters === void 0 ? void 0 : parameters.leadUserName,
-                    leadAccountId: parameters === null || parameters === void 0 ? void 0 : parameters.leadAccountId,
-                    assigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.assigneeType,
-                    assignee: parameters === null || parameters === void 0 ? void 0 : parameters.assignee,
-                    realAssigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.realAssigneeType,
-                    realAssignee: parameters === null || parameters === void 0 ? void 0 : parameters.realAssignee,
-                    isAssigneeTypeValid: parameters === null || parameters === void 0 ? void 0 : parameters.isAssigneeTypeValid,
-                    project: parameters === null || parameters === void 0 ? void 0 : parameters.project,
-                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                    assignee: parameters.assignee,
+                    assigneeType: parameters.assigneeType,
+                    description: parameters.description,
+                    id: parameters.id,
+                    isAssigneeTypeValid: parameters.isAssigneeTypeValid,
+                    lead: parameters.lead,
+                    leadAccountId: parameters.leadAccountId,
+                    leadUserName: parameters.leadUserName,
+                    name: parameters.name,
+                    project: parameters.project,
+                    projectId: parameters.projectId,
+                    realAssignee: parameters.realAssignee,
+                    realAssigneeType: parameters.realAssigneeType,
+                    self: parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -32851,8 +31884,9 @@ class ProjectComponents {
     }
     getComponent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/component/${parameters.id}`,
+                url: `/rest/api/2/component/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32877,11 +31911,12 @@ class ProjectComponents {
     }
     deleteComponent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/component/${parameters.id}`,
+                url: `/rest/api/2/component/${id}`,
                 method: 'DELETE',
                 params: {
-                    moveIssuesTo: parameters.moveIssuesTo,
+                    moveIssuesTo: typeof parameters !== 'string' && parameters.moveIssuesTo,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -32889,8 +31924,9 @@ class ProjectComponents {
     }
     getComponentRelatedIssues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/component/${parameters.id}/relatedIssueCounts`,
+                url: `/rest/api/2/component/${id}/relatedIssueCounts`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32913,8 +31949,9 @@ class ProjectComponents {
     }
     getProjectComponents(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/components`,
+                url: `/rest/api/2/project/${projectIdOrKey}/components`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32940,8 +31977,9 @@ class ProjectEmail {
     }
     getProjectEmail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectId = typeof parameters === 'string' ? parameters : parameters.projectId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectId}/email`,
+                url: `/rest/api/2/project/${projectId}/email`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -32980,8 +32018,9 @@ class ProjectFeatures {
     }
     getFeaturesForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/features`,
+                url: `/rest/api/2/project/${projectIdOrKey}/features`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33019,11 +32058,12 @@ class ProjectKeyAndNameValidation {
     }
     validateProjectKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters === null || parameters === void 0 ? void 0 : parameters.key;
             const config = {
                 url: '/rest/api/2/projectvalidate/key',
                 method: 'GET',
                 params: {
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
+                    key,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33031,11 +32071,12 @@ class ProjectKeyAndNameValidation {
     }
     getValidProjectKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters === null || parameters === void 0 ? void 0 : parameters.key;
             const config = {
                 url: '/rest/api/2/projectvalidate/validProjectKey',
                 method: 'GET',
                 params: {
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
+                    key,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33043,11 +32084,12 @@ class ProjectKeyAndNameValidation {
     }
     getValidProjectName(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const name = typeof parameters === 'string' ? parameters : parameters.name;
             const config = {
                 url: '/rest/api/2/projectvalidate/validProjectName',
                 method: 'GET',
                 params: {
-                    name: parameters.name,
+                    name,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33073,8 +32115,9 @@ class ProjectPermissionSchemes {
     }
     getProjectIssueSecurityScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectKeyOrId}/issuesecuritylevelscheme`,
+                url: `/rest/api/2/project/${projectKeyOrId}/issuesecuritylevelscheme`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33082,11 +32125,12 @@ class ProjectPermissionSchemes {
     }
     getAssignedPermissionScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectKeyOrId}/permissionscheme`,
+                url: `/rest/api/2/project/${projectKeyOrId}/permissionscheme`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33109,8 +32153,9 @@ class ProjectPermissionSchemes {
     }
     getSecurityLevelsForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectKeyOrId}/securitylevel`,
+                url: `/rest/api/2/project/${projectKeyOrId}/securitylevel`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33136,8 +32181,9 @@ class ProjectProperties {
     }
     getProjectPropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/properties`,
+                url: `/rest/api/2/project/${projectIdOrKey}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33157,6 +32203,7 @@ class ProjectProperties {
             const config = {
                 url: `/rest/api/2/project/${parameters.projectIdOrKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -33230,8 +32277,9 @@ class ProjectRoleActors {
     }
     getProjectRoleActorsForRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/role/${parameters.id}/actors`,
+                url: `/rest/api/2/role/${id}/actors`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33285,8 +32333,9 @@ class ProjectRoles {
     }
     getProjectRoles(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/role`,
+                url: `/rest/api/2/project/${projectIdOrKey}/role`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33306,12 +32355,13 @@ class ProjectRoles {
     }
     getProjectRoleDetails(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/roledetails`,
+                url: `/rest/api/2/project/${projectIdOrKey}/roledetails`,
                 method: 'GET',
                 params: {
-                    currentMember: parameters.currentMember,
-                    excludeConnectAddons: parameters.excludeConnectAddons,
+                    currentMember: typeof parameters !== 'string' && parameters.currentMember,
+                    excludeConnectAddons: typeof parameters !== 'string' && parameters.excludeConnectAddons,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33332,8 +32382,8 @@ class ProjectRoles {
                 url: '/rest/api/2/role',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    name: parameters.name,
+                    description: parameters.description,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33341,8 +32391,9 @@ class ProjectRoles {
     }
     getProjectRoleById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/role/${parameters.id}`,
+                url: `/rest/api/2/role/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33376,11 +32427,12 @@ class ProjectRoles {
     }
     deleteProjectRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/role/${parameters.id}`,
+                url: `/rest/api/2/role/${id}`,
                 method: 'DELETE',
                 params: {
-                    swap: parameters.swap,
+                    swap: typeof parameters !== 'string' && parameters.swap,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33424,8 +32476,9 @@ class ProjectTypes {
     }
     getProjectTypeByKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectTypeKey = typeof parameters === 'string' ? parameters : parameters.projectTypeKey;
             const config = {
-                url: `/rest/api/2/project/type/${parameters.projectTypeKey}`,
+                url: `/rest/api/2/project/type/${projectTypeKey}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33433,8 +32486,9 @@ class ProjectTypes {
     }
     getAccessibleProjectTypeByKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectTypeKey = typeof parameters === 'string' ? parameters : parameters.projectTypeKey;
             const config = {
-                url: `/rest/api/2/project/type/${parameters.projectTypeKey}/accessible`,
+                url: `/rest/api/2/project/type/${projectTypeKey}/accessible`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33460,16 +32514,17 @@ class ProjectVersions {
     }
     getProjectVersionsPaginated(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/version`,
+                url: `/rest/api/2/project/${projectIdOrKey}/version`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    orderBy: parameters.orderBy,
-                    query: parameters.query,
-                    status: parameters.status,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    orderBy: typeof parameters !== 'string' && parameters.orderBy,
+                    query: typeof parameters !== 'string' && parameters.query,
+                    status: typeof parameters !== 'string' && parameters.status,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33477,11 +32532,12 @@ class ProjectVersions {
     }
     getProjectVersions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/versions`,
+                url: `/rest/api/2/project/${projectIdOrKey}/versions`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33493,23 +32549,23 @@ class ProjectVersions {
                 url: '/rest/api/2/version',
                 method: 'POST',
                 data: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    archived: parameters === null || parameters === void 0 ? void 0 : parameters.archived,
-                    released: parameters === null || parameters === void 0 ? void 0 : parameters.released,
-                    startDate: parameters === null || parameters === void 0 ? void 0 : parameters.startDate,
-                    releaseDate: parameters === null || parameters === void 0 ? void 0 : parameters.releaseDate,
-                    overdue: parameters === null || parameters === void 0 ? void 0 : parameters.overdue,
-                    userStartDate: parameters === null || parameters === void 0 ? void 0 : parameters.userStartDate,
-                    userReleaseDate: parameters === null || parameters === void 0 ? void 0 : parameters.userReleaseDate,
-                    project: parameters === null || parameters === void 0 ? void 0 : parameters.project,
-                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
-                    moveUnfixedIssuesTo: parameters === null || parameters === void 0 ? void 0 : parameters.moveUnfixedIssuesTo,
-                    operations: parameters === null || parameters === void 0 ? void 0 : parameters.operations,
-                    issuesStatusForFixVersion: parameters === null || parameters === void 0 ? void 0 : parameters.issuesStatusForFixVersion,
+                    expand: parameters.expand,
+                    self: parameters.self,
+                    id: parameters.id,
+                    description: parameters.description,
+                    name: parameters.name,
+                    archived: parameters.archived,
+                    released: parameters.released,
+                    startDate: parameters.startDate,
+                    releaseDate: parameters.releaseDate,
+                    overdue: parameters.overdue,
+                    userStartDate: parameters.userStartDate,
+                    userReleaseDate: parameters.userReleaseDate,
+                    project: parameters.project,
+                    projectId: parameters.projectId,
+                    moveUnfixedIssuesTo: parameters.moveUnfixedIssuesTo,
+                    operations: parameters.operations,
+                    issuesStatusForFixVersion: parameters.issuesStatusForFixVersion,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33517,11 +32573,12 @@ class ProjectVersions {
     }
     getVersion(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/version/${parameters.id}`,
+                url: `/rest/api/2/version/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33585,8 +32642,9 @@ class ProjectVersions {
     }
     getVersionRelatedIssues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/version/${parameters.id}/relatedIssueCounts`,
+                url: `/rest/api/2/version/${id}/relatedIssueCounts`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33608,8 +32666,9 @@ class ProjectVersions {
     }
     getVersionUnresolvedIssues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/version/${parameters.id}/unresolvedIssueCount`,
+                url: `/rest/api/2/version/${id}/unresolvedIssueCount`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33653,24 +32712,24 @@ class Projects {
                 url: '/rest/api/2/project',
                 method: 'POST',
                 data: {
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    lead: parameters === null || parameters === void 0 ? void 0 : parameters.lead,
-                    leadAccountId: parameters === null || parameters === void 0 ? void 0 : parameters.leadAccountId,
-                    url: parameters === null || parameters === void 0 ? void 0 : parameters.url,
-                    assigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.assigneeType,
-                    avatarId: parameters === null || parameters === void 0 ? void 0 : parameters.avatarId,
-                    issueSecurityScheme: parameters === null || parameters === void 0 ? void 0 : parameters.issueSecurityScheme,
-                    permissionScheme: parameters === null || parameters === void 0 ? void 0 : parameters.permissionScheme,
-                    notificationScheme: parameters === null || parameters === void 0 ? void 0 : parameters.notificationScheme,
-                    categoryId: parameters === null || parameters === void 0 ? void 0 : parameters.categoryId,
-                    projectTypeKey: parameters === null || parameters === void 0 ? void 0 : parameters.projectTypeKey,
-                    projectTemplateKey: parameters === null || parameters === void 0 ? void 0 : parameters.projectTemplateKey,
-                    workflowScheme: parameters === null || parameters === void 0 ? void 0 : parameters.workflowScheme,
-                    issueTypeScreenScheme: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypeScreenScheme,
-                    issueTypeScheme: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypeScheme,
-                    fieldConfigurationScheme: parameters === null || parameters === void 0 ? void 0 : parameters.fieldConfigurationScheme,
+                    assigneeType: parameters.assigneeType,
+                    avatarId: parameters.avatarId,
+                    categoryId: parameters.categoryId,
+                    description: parameters.description,
+                    fieldConfigurationScheme: parameters.fieldConfigurationScheme,
+                    issueSecurityScheme: parameters.issueSecurityScheme,
+                    issueTypeScheme: parameters.issueTypeScheme,
+                    issueTypeScreenScheme: parameters.issueTypeScreenScheme,
+                    key: parameters.key,
+                    lead: parameters.lead,
+                    leadAccountId: parameters.leadAccountId,
+                    name: parameters.name,
+                    notificationScheme: parameters.notificationScheme,
+                    permissionScheme: parameters.permissionScheme,
+                    projectTemplateKey: parameters.projectTemplateKey,
+                    projectTypeKey: parameters.projectTypeKey,
+                    url: parameters.url,
+                    workflowScheme: parameters.workflowScheme,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33715,12 +32774,13 @@ class Projects {
     }
     getProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}`,
+                url: `/rest/api/2/project/${projectIdOrKey}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
-                    properties: parameters.properties,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    properties: typeof parameters !== 'string' && parameters.properties,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33735,20 +32795,20 @@ class Projects {
                     expand: parameters.expand,
                 },
                 data: {
-                    key: parameters.key,
-                    name: parameters.name,
-                    projectTypeKey: parameters.projectTypeKey,
-                    projectTemplateKey: parameters.projectTemplateKey,
-                    description: parameters.description,
-                    lead: parameters.lead,
-                    leadAccountId: parameters.leadAccountId,
-                    url: parameters.url,
                     assigneeType: parameters.assigneeType,
                     avatarId: parameters.avatarId,
-                    issueSecurityScheme: parameters.issueSecurityScheme,
-                    permissionScheme: parameters.permissionScheme,
-                    notificationScheme: parameters.notificationScheme,
                     categoryId: parameters.categoryId,
+                    description: parameters.description,
+                    issueSecurityScheme: parameters.issueSecurityScheme,
+                    key: parameters.key,
+                    lead: parameters.lead,
+                    leadAccountId: parameters.leadAccountId,
+                    name: parameters.name,
+                    notificationScheme: parameters.notificationScheme,
+                    permissionScheme: parameters.permissionScheme,
+                    projectTemplateKey: parameters.projectTemplateKey,
+                    projectTypeKey: parameters.projectTypeKey,
+                    url: parameters.url,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33756,11 +32816,12 @@ class Projects {
     }
     deleteProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}`,
+                url: `/rest/api/2/project/${projectIdOrKey}`,
                 method: 'DELETE',
                 params: {
-                    enableUndo: parameters.enableUndo,
+                    enableUndo: typeof parameters !== 'string' && parameters.enableUndo,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33768,8 +32829,9 @@ class Projects {
     }
     archiveProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/archive`,
+                url: `/rest/api/2/project/${projectIdOrKey}/archive`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -33777,8 +32839,9 @@ class Projects {
     }
     deleteProjectAsynchronously(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/delete`,
+                url: `/rest/api/2/project/${projectIdOrKey}/delete`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -33786,8 +32849,9 @@ class Projects {
     }
     restore(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/restore`,
+                url: `/rest/api/2/project/${projectIdOrKey}/restore`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -33795,8 +32859,9 @@ class Projects {
     }
     getAllStatuses(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectIdOrKey}/statuses`,
+                url: `/rest/api/2/project/${projectIdOrKey}/statuses`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33813,8 +32878,9 @@ class Projects {
     }
     getHierarchy(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectId = typeof parameters === 'string' ? parameters : parameters.projectId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectId}/hierarchy`,
+                url: `/rest/api/2/project/${projectId}/hierarchy`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -33822,11 +32888,12 @@ class Projects {
     }
     getNotificationSchemeForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/2/project/${parameters.projectKeyOrId}/notificationscheme`,
+                url: `/rest/api/2/project/${projectKeyOrId}/notificationscheme`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33869,13 +32936,14 @@ class ScreenSchemes {
     }
     createScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const name = typeof parameters === 'string' ? parameters : parameters.name;
             const config = {
                 url: '/rest/api/2/screenscheme',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    screens: parameters === null || parameters === void 0 ? void 0 : parameters.screens,
+                    name,
+                    description: typeof parameters !== 'string' && parameters.description,
+                    screens: typeof parameters !== 'string' && parameters.screens,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -33897,8 +32965,9 @@ class ScreenSchemes {
     }
     deleteScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenSchemeId = typeof parameters === 'string' ? parameters : parameters.screenSchemeId;
             const config = {
-                url: `/rest/api/2/screenscheme/${parameters.screenSchemeId}`,
+                url: `/rest/api/2/screenscheme/${screenSchemeId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -33988,11 +33057,12 @@ class ScreenTabs {
     }
     getAllScreenTabs(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/2/screens/${parameters.screenId}/tabs`,
+                url: `/rest/api/2/screens/${screenId}/tabs`,
                 method: 'GET',
                 params: {
-                    projectKey: parameters.projectKey,
+                    projectKey: typeof parameters !== 'string' && parameters.projectKey,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34062,13 +33132,14 @@ class Screens {
     }
     getScreensForField(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/field/${parameters.fieldId}/screens`,
+                url: `/rest/api/2/field/${fieldId}/screens`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34097,8 +33168,8 @@ class Screens {
                 url: '/rest/api/2/screens',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    name: parameters.name,
+                    description: parameters.description,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34106,8 +33177,9 @@ class Screens {
     }
     addFieldToDefaultScreen(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/2/screens/addToDefault/${parameters.fieldId}`,
+                url: `/rest/api/2/screens/addToDefault/${fieldId}`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -34128,8 +33200,9 @@ class Screens {
     }
     deleteScreen(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/2/screens/${parameters.screenId}`,
+                url: `/rest/api/2/screens/${screenId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -34137,8 +33210,9 @@ class Screens {
     }
     getAvailableScreenFields(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/2/screens/${parameters.screenId}/availableFields`,
+                url: `/rest/api/2/screens/${screenId}/availableFields`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -34191,12 +33265,13 @@ class Status {
     }
     getStatusesById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
                 url: '/rest/api/2/statuses',
                 method: 'GET',
                 params: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    id,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34208,8 +33283,8 @@ class Status {
                 url: '/rest/api/2/statuses',
                 method: 'POST',
                 data: {
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
-                    scope: parameters === null || parameters === void 0 ? void 0 : parameters.scope,
+                    statuses: parameters.statuses,
+                    scope: parameters.scope,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34221,7 +33296,7 @@ class Status {
                 url: '/rest/api/2/statuses',
                 method: 'PUT',
                 data: {
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
+                    statuses: parameters.statuses,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34229,11 +33304,12 @@ class Status {
     }
     deleteStatusesById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
                 url: '/rest/api/2/statuses',
                 method: 'DELETE',
                 params: {
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    id,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34276,8 +33352,9 @@ class Tasks {
     }
     getTask(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const taskId = typeof parameters === 'string' ? parameters : parameters.taskId;
             const config = {
-                url: `/rest/api/2/task/${parameters.taskId}`,
+                url: `/rest/api/2/task/${taskId}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -34285,8 +33362,9 @@ class Tasks {
     }
     cancelTask(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const taskId = typeof parameters === 'string' ? parameters : parameters.taskId;
             const config = {
-                url: `/rest/api/2/task/${parameters.taskId}/cancel`,
+                url: `/rest/api/2/task/${taskId}/cancel`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -34404,10 +33482,10 @@ class UIModificationsApps {
                 url: '/rest/api/2/uiModifications',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    data: parameters === null || parameters === void 0 ? void 0 : parameters.data,
-                    contexts: parameters === null || parameters === void 0 ? void 0 : parameters.contexts,
+                    name: parameters.name,
+                    description: parameters.description,
+                    data: parameters.data,
+                    contexts: parameters.contexts,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34430,8 +33508,9 @@ class UIModificationsApps {
     }
     deleteUiModification(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const uiModificationId = typeof parameters === 'string' ? parameters : parameters.uiModificationId;
             const config = {
-                url: `/rest/api/2/uiModifications/${parameters.uiModificationId}`,
+                url: `/rest/api/2/uiModifications/${uiModificationId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -34493,6 +33572,7 @@ class UserProperties {
                     userKey: parameters.userKey,
                     username: parameters.username,
                 },
+                data: parameters.propertyValue,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -34525,6 +33605,7 @@ exports.UserProperties = UserProperties;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UserSearch = void 0;
 const tslib_1 = __nccwpck_require__(89106);
+const paramSerializer_1 = __nccwpck_require__(52517);
 class UserSearch {
     constructor(client) {
         this.client = client;
@@ -34596,7 +33677,7 @@ class UserSearch {
                     maxResults: parameters.maxResults,
                     showAvatar: parameters.showAvatar,
                     exclude: parameters.exclude,
-                    excludeAccountIds: parameters.excludeAccountIds,
+                    excludeAccountIds: (0, paramSerializer_1.paramSerializer)('excludeAccountIds', parameters.excludeAccountIds),
                     avatarSize: parameters.avatarSize,
                     excludeConnectUsers: parameters.excludeConnectUsers,
                 },
@@ -34707,13 +33788,14 @@ class Users {
                 url: '/rest/api/2/user',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    password: parameters === null || parameters === void 0 ? void 0 : parameters.password,
-                    emailAddress: parameters === null || parameters === void 0 ? void 0 : parameters.emailAddress,
-                    displayName: parameters === null || parameters === void 0 ? void 0 : parameters.displayName,
-                    applicationKeys: parameters === null || parameters === void 0 ? void 0 : parameters.applicationKeys,
+                    applicationKeys: parameters.applicationKeys,
+                    displayName: parameters.displayName,
+                    emailAddress: parameters.emailAddress,
+                    key: parameters.key,
+                    name: parameters.name,
+                    password: parameters.password,
+                    products: parameters.products,
+                    self: parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34785,6 +33867,7 @@ class Users {
                 params: {
                     accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
                 },
+                data: parameters === null || parameters === void 0 ? void 0 : parameters.columns,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -34795,8 +33878,8 @@ class Users {
                 url: '/rest/api/2/user/columns',
                 method: 'DELETE',
                 params: {
-                    accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
-                    username: parameters === null || parameters === void 0 ? void 0 : parameters.username,
+                    accountId: parameters.accountId,
+                    username: parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34804,11 +33887,12 @@ class Users {
     }
     getUserEmail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const accountId = typeof parameters === 'string' ? parameters : parameters.accountId;
             const config = {
                 url: '/rest/api/2/user/email',
                 method: 'GET',
                 params: {
-                    accountId: parameters.accountId,
+                    accountId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34816,11 +33900,12 @@ class Users {
     }
     getUserEmailBulk(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const accountId = typeof parameters === 'string' ? parameters : parameters.accountId;
             const config = {
                 url: '/rest/api/2/user/email/bulk',
                 method: 'GET',
                 params: {
-                    accountId: parameters.accountId,
+                    accountId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34903,8 +33988,8 @@ class Webhooks {
                 url: '/rest/api/2/webhook',
                 method: 'POST',
                 data: {
-                    webhooks: parameters === null || parameters === void 0 ? void 0 : parameters.webhooks,
-                    url: parameters === null || parameters === void 0 ? void 0 : parameters.url,
+                    webhooks: parameters.webhooks,
+                    url: parameters.url,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34916,7 +34001,7 @@ class Webhooks {
                 url: '/rest/api/2/webhook',
                 method: 'DELETE',
                 data: {
-                    webhookIds: parameters === null || parameters === void 0 ? void 0 : parameters.webhookIds,
+                    webhookIds: parameters.webhookIds,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34941,7 +34026,7 @@ class Webhooks {
                 url: '/rest/api/2/webhook/refresh',
                 method: 'PUT',
                 data: {
-                    webhookIds: parameters === null || parameters === void 0 ? void 0 : parameters.webhookIds,
+                    webhookIds: parameters.webhookIds,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -34967,8 +34052,9 @@ class WorkflowSchemeDrafts {
     }
     createWorkflowSchemeDraftFromParent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/createdraft`,
+                url: `/rest/api/2/workflowscheme/${id}/createdraft`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -34976,8 +34062,9 @@ class WorkflowSchemeDrafts {
     }
     getWorkflowSchemeDraft(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/draft`,
+                url: `/rest/api/2/workflowscheme/${id}/draft`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35001,8 +34088,9 @@ class WorkflowSchemeDrafts {
     }
     deleteWorkflowSchemeDraft(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/draft`,
+                url: `/rest/api/2/workflowscheme/${id}/draft`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -35010,8 +34098,9 @@ class WorkflowSchemeDrafts {
     }
     getDraftDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/draft/default`,
+                url: `/rest/api/2/workflowscheme/${id}/draft/default`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35032,8 +34121,9 @@ class WorkflowSchemeDrafts {
     }
     deleteDraftDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/draft/default`,
+                url: `/rest/api/2/workflowscheme/${id}/draft/default`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -35069,14 +34159,15 @@ class WorkflowSchemeDrafts {
     }
     publishDraftWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/draft/publish`,
+                url: `/rest/api/2/workflowscheme/${id}/draft/publish`,
                 method: 'POST',
                 params: {
-                    validateOnly: parameters.validateOnly,
+                    validateOnly: typeof parameters !== 'string' && parameters.validateOnly,
                 },
                 data: {
-                    statusMappings: parameters.statusMappings,
+                    statusMappings: typeof parameters !== 'string' && parameters.statusMappings,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35210,19 +34301,19 @@ class WorkflowSchemes {
                 url: '/rest/api/2/workflowscheme',
                 method: 'POST',
                 data: {
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    defaultWorkflow: parameters === null || parameters === void 0 ? void 0 : parameters.defaultWorkflow,
-                    issueTypeMappings: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypeMappings,
-                    originalDefaultWorkflow: parameters === null || parameters === void 0 ? void 0 : parameters.originalDefaultWorkflow,
-                    originalIssueTypeMappings: parameters === null || parameters === void 0 ? void 0 : parameters.originalIssueTypeMappings,
-                    draft: parameters === null || parameters === void 0 ? void 0 : parameters.draft,
-                    lastModifiedUser: parameters === null || parameters === void 0 ? void 0 : parameters.lastModifiedUser,
-                    lastModified: parameters === null || parameters === void 0 ? void 0 : parameters.lastModified,
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    updateDraftIfNeeded: parameters === null || parameters === void 0 ? void 0 : parameters.updateDraftIfNeeded,
-                    issueTypes: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypes,
+                    id: parameters.id,
+                    name: parameters.name,
+                    description: parameters.description,
+                    defaultWorkflow: parameters.defaultWorkflow,
+                    issueTypeMappings: parameters.issueTypeMappings,
+                    originalDefaultWorkflow: parameters.originalDefaultWorkflow,
+                    originalIssueTypeMappings: parameters.originalIssueTypeMappings,
+                    draft: parameters.draft,
+                    lastModifiedUser: parameters.lastModifiedUser,
+                    lastModified: parameters.lastModified,
+                    self: parameters.self,
+                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    issueTypes: parameters.issueTypes,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35230,11 +34321,12 @@ class WorkflowSchemes {
     }
     getWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}`,
+                url: `/rest/api/2/workflowscheme/${id}`,
                 method: 'GET',
                 params: {
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35258,8 +34350,9 @@ class WorkflowSchemes {
     }
     deleteWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}`,
+                url: `/rest/api/2/workflowscheme/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -35267,11 +34360,12 @@ class WorkflowSchemes {
     }
     getDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/default`,
+                url: `/rest/api/2/workflowscheme/${id}/default`,
                 method: 'GET',
                 params: {
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35292,11 +34386,12 @@ class WorkflowSchemes {
     }
     deleteDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/default`,
+                url: `/rest/api/2/workflowscheme/${id}/default`,
                 method: 'DELETE',
                 params: {
-                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    updateDraftIfNeeded: typeof parameters !== 'string' && parameters.updateDraftIfNeeded,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35338,12 +34433,13 @@ class WorkflowSchemes {
     }
     getWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/workflow`,
+                url: `/rest/api/2/workflowscheme/${id}/workflow`,
                 method: 'GET',
                 params: {
-                    workflowName: parameters.workflowName,
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    workflowName: typeof parameters !== 'string' && parameters.workflowName,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35369,12 +34465,13 @@ class WorkflowSchemes {
     }
     deleteWorkflowMapping(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/2/workflowscheme/${parameters.id}/workflow`,
+                url: `/rest/api/2/workflowscheme/${id}/workflow`,
                 method: 'DELETE',
                 params: {
-                    workflowName: parameters.workflowName,
-                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    workflowName: typeof parameters !== 'string' && parameters.workflowName,
+                    updateDraftIfNeeded: typeof parameters !== 'string' && parameters.updateDraftIfNeeded,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35409,8 +34506,9 @@ class WorkflowStatusCategories {
     }
     getStatusCategory(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const idOrKey = typeof parameters === 'string' ? parameters : parameters.idOrKey;
             const config = {
-                url: `/rest/api/2/statuscategory/${parameters.idOrKey}`,
+                url: `/rest/api/2/statuscategory/${idOrKey}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35445,8 +34543,9 @@ class WorkflowStatuses {
     }
     getStatus(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const idOrName = typeof parameters === 'string' ? parameters : parameters.idOrName;
             const config = {
-                url: `/rest/api/2/status/${parameters.idOrName}`,
+                url: `/rest/api/2/status/${idOrName}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35572,7 +34671,7 @@ class WorkflowTransitionRules {
                 url: '/rest/api/2/workflow/rule/config',
                 method: 'PUT',
                 data: {
-                    workflows: parameters === null || parameters === void 0 ? void 0 : parameters.workflows,
+                    workflows: parameters.workflows,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35627,10 +34726,10 @@ class Workflows {
                 url: '/rest/api/2/workflow',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    transitions: parameters === null || parameters === void 0 ? void 0 : parameters.transitions,
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
+                    name: parameters.name,
+                    description: parameters.description,
+                    transitions: parameters.transitions,
+                    statuses: parameters.statuses,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35656,8 +34755,9 @@ class Workflows {
     }
     deleteInactiveWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const entityId = typeof parameters === 'string' ? parameters : parameters.entityId;
             const config = {
-                url: `/rest/api/2/workflow/${parameters.entityId}`,
+                url: `/rest/api/2/workflow/${entityId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -35696,9 +34796,9 @@ class AnnouncementBanner {
                 url: '/rest/api/3/announcementBanner',
                 method: 'PUT',
                 data: {
-                    message: parameters === null || parameters === void 0 ? void 0 : parameters.message,
                     isDismissible: parameters === null || parameters === void 0 ? void 0 : parameters.isDismissible,
                     isEnabled: parameters === null || parameters === void 0 ? void 0 : parameters.isEnabled,
+                    message: parameters === null || parameters === void 0 ? void 0 : parameters.message,
                     visibility: parameters === null || parameters === void 0 ? void 0 : parameters.visibility,
                 },
             };
@@ -35729,8 +34829,8 @@ class AppMigration {
                 url: '/rest/atlassian-connect/1/migration/field',
                 method: 'PUT',
                 headers: {
-                    'Atlassian-Transfer-Id': parameters.transferId,
                     'Atlassian-Account-Id': parameters.accountId,
+                    'Atlassian-Transfer-Id': parameters.transferId,
                 },
                 data: {
                     updateValueList: parameters.updateValueList,
@@ -35746,9 +34846,9 @@ class AppMigration {
                 url: `/rest/atlassian-connect/1/migration/properties/${parameters.entityType}`,
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Atlassian-Transfer-Id': parameters.transferId,
                     'Atlassian-Account-Id': parameters.accountId,
+                    'Atlassian-Transfer-Id': parameters.transferId,
+                    'Content-Type': 'application/json',
                 },
                 data: (_a = parameters.body) !== null && _a !== void 0 ? _a : parameters.entities,
             };
@@ -35764,9 +34864,9 @@ class AppMigration {
                     'Atlassian-Transfer-Id': parameters.transferId,
                 },
                 data: {
-                    workflowEntityId: parameters.workflowEntityId,
-                    ruleIds: parameters.ruleIds,
                     expand: parameters.expand,
+                    ruleIds: parameters.ruleIds,
+                    workflowEntityId: parameters.workflowEntityId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -35792,8 +34892,9 @@ class AppProperties {
     }
     getAddonProperties(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const addonKey = typeof parameters === 'string' ? parameters : parameters.addonKey;
             const config = {
-                url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties`,
+                url: `/rest/atlassian-connect/1/addons/${addonKey}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35809,10 +34910,12 @@ class AppProperties {
         });
     }
     putAddonProperty(parameters, callback) {
+        var _a;
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: (_a = parameters.propertyValue) !== null && _a !== void 0 ? _a : parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -35821,6 +34924,25 @@ class AppProperties {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/atlassian-connect/1/addons/${parameters.addonKey}/properties/${parameters.propertyKey}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    putAppProperty(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/forge/1/app/properties/${parameters.propertyKey}`,
+                method: 'PUT',
+                data: parameters.propertyValue,
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteAppProperty(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/forge/1/app/properties/${parameters.propertyKey}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -35855,8 +34977,9 @@ class ApplicationRoles {
     }
     getApplicationRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters.key;
             const config = {
-                url: `/rest/api/3/applicationrole/${parameters.key}`,
+                url: `/rest/api/3/applicationrole/${key}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35916,8 +35039,9 @@ class Avatars {
     }
     getAllSystemAvatars(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const type = typeof parameters === 'string' ? parameters : parameters.type;
             const config = {
-                url: `/rest/api/3/avatar/${parameters.type}/system`,
+                url: `/rest/api/3/avatar/${type}/system`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -35957,12 +35081,13 @@ class Avatars {
     }
     getAvatarImageByType(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const type = typeof parameters === 'string' ? parameters : parameters.type;
             const config = {
-                url: `/rest/api/3/universal_avatar/view/type/${parameters.type}`,
+                url: `/rest/api/3/universal_avatar/view/type/${type}`,
                 method: 'GET',
                 params: {
-                    size: parameters.size,
-                    format: parameters.format,
+                    size: typeof parameters !== 'string' && parameters.size,
+                    format: typeof parameters !== 'string' && parameters.format,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36071,7 +35196,9 @@ class Version3Client extends clients_1.BaseClient {
         this.jiraExpressions = new __1.JiraExpressions(this);
         this.jiraSettings = new __1.JiraSettings(this);
         this.jql = new __1.JQL(this);
+        this.jqlFunctionsApps = new __1.JqlFunctionsApps(this);
         this.labels = new __1.Labels(this);
+        this.licenseMetrics = new __1.LicenseMetrics(this);
         this.myself = new __1.Myself(this);
         this.permissions = new __1.Permissions(this);
         this.permissionSchemes = new __1.PermissionSchemes(this);
@@ -36190,13 +35317,14 @@ class Dashboards {
     }
     getAllGadgets(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const dashboardId = typeof parameters === 'string' ? parameters : parameters.dashboardId;
             const config = {
-                url: `/rest/api/3/dashboard/${parameters.dashboardId}/gadget`,
+                url: `/rest/api/3/dashboard/${dashboardId}/gadget`,
                 method: 'GET',
                 params: {
-                    moduleKey: parameters.moduleKey,
-                    uri: parameters.uri,
-                    gadgetId: parameters.gadgetId,
+                    moduleKey: typeof parameters !== 'string' && parameters.moduleKey,
+                    uri: typeof parameters !== 'string' && parameters.uri,
+                    gadgetId: typeof parameters !== 'string' && parameters.gadgetId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36265,6 +35393,10 @@ class Dashboards {
             const config = {
                 url: `/rest/api/3/dashboard/${parameters.dashboardId}/items/${parameters.itemId}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                data: parameters.body,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -36280,8 +35412,9 @@ class Dashboards {
     }
     getDashboard(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/dashboard/${parameters.id}`,
+                url: `/rest/api/3/dashboard/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -36304,8 +35437,9 @@ class Dashboards {
     }
     deleteDashboard(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/dashboard/${parameters.id}`,
+                url: `/rest/api/3/dashboard/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -36406,11 +35540,12 @@ class FilterSharing {
     }
     setDefaultShareScope(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const scope = typeof parameters === 'string' ? parameters : parameters.scope;
             const config = {
                 url: '/rest/api/3/filter/defaultShareScope',
                 method: 'PUT',
                 data: {
-                    scope: parameters === null || parameters === void 0 ? void 0 : parameters.scope,
+                    scope,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36418,8 +35553,9 @@ class FilterSharing {
     }
     getSharePermissions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}/permission`,
+                url: `/rest/api/3/filter/${id}/permission`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -36570,12 +35706,13 @@ class Filters {
     }
     getFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}`,
+                url: `/rest/api/3/filter/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
-                    overrideSharePermissions: parameters.overrideSharePermissions,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    overrideSharePermissions: typeof parameters !== 'string' && parameters.overrideSharePermissions,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36603,8 +35740,9 @@ class Filters {
     }
     deleteFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}`,
+                url: `/rest/api/3/filter/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -36612,8 +35750,9 @@ class Filters {
     }
     getColumns(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}/columns`,
+                url: `/rest/api/3/filter/${id}/columns`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -36624,14 +35763,16 @@ class Filters {
             const config = {
                 url: `/rest/api/3/filter/${parameters.id}/columns`,
                 method: 'PUT',
+                data: parameters.columns,
             };
             return this.client.sendRequest(config, callback);
         });
     }
     resetColumns(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}/columns`,
+                url: `/rest/api/3/filter/${id}/columns`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -36639,11 +35780,12 @@ class Filters {
     }
     setFavouriteForFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}/favourite`,
+                url: `/rest/api/3/filter/${id}/favourite`,
                 method: 'PUT',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36651,11 +35793,12 @@ class Filters {
     }
     deleteFavouriteForFilter(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/filter/${parameters.id}/favourite`,
+                url: `/rest/api/3/filter/${id}/favourite`,
                 method: 'DELETE',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36778,6 +35921,8 @@ class Groups {
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
                     groupId: parameters === null || parameters === void 0 ? void 0 : parameters.groupId,
                     groupName: parameters === null || parameters === void 0 ? void 0 : parameters.groupName,
+                    accessType: parameters === null || parameters === void 0 ? void 0 : parameters.accessType,
+                    applicationKey: parameters === null || parameters === void 0 ? void 0 : parameters.applicationKey,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -36838,10 +35983,11 @@ class Groups {
                 method: 'GET',
                 params: {
                     accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
-                    query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
+                    caseInsensitive: parameters === null || parameters === void 0 ? void 0 : parameters.caseInsensitive,
                     exclude: parameters === null || parameters === void 0 ? void 0 : parameters.exclude,
                     excludeId: parameters === null || parameters === void 0 ? void 0 : parameters.excludeId,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
                     userName: parameters === null || parameters === void 0 ? void 0 : parameters.userName,
                 },
             };
@@ -36909,7 +36055,9 @@ tslib_1.__exportStar(__nccwpck_require__(13814), exports);
 tslib_1.__exportStar(__nccwpck_require__(95698), exports);
 tslib_1.__exportStar(__nccwpck_require__(329), exports);
 tslib_1.__exportStar(__nccwpck_require__(44313), exports);
+tslib_1.__exportStar(__nccwpck_require__(62541), exports);
 tslib_1.__exportStar(__nccwpck_require__(67834), exports);
+tslib_1.__exportStar(__nccwpck_require__(75584), exports);
 tslib_1.__exportStar(__nccwpck_require__(37919), exports);
 tslib_1.__exportStar(__nccwpck_require__(89595), exports);
 tslib_1.__exportStar(__nccwpck_require__(94526), exports);
@@ -37067,11 +36215,12 @@ class IssueAttachments {
     }
     getAttachmentContent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/content/${parameters.id}`,
+                url: `/rest/api/3/attachment/content/${id}`,
                 method: 'GET',
                 params: {
-                    redirect: parameters.redirect,
+                    redirect: typeof parameters !== 'string' && parameters.redirect,
                 },
                 responseType: 'arraybuffer',
             };
@@ -37089,14 +36238,15 @@ class IssueAttachments {
     }
     getAttachmentThumbnail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/thumbnail/${parameters.id}`,
+                url: `/rest/api/3/attachment/thumbnail/${id}`,
                 method: 'GET',
                 params: {
-                    redirect: parameters.redirect,
-                    fallbackToDefault: parameters.fallbackToDefault,
-                    width: parameters.width,
-                    height: parameters.height,
+                    redirect: typeof parameters !== 'string' && parameters.redirect,
+                    fallbackToDefault: typeof parameters !== 'string' && parameters.fallbackToDefault,
+                    width: typeof parameters !== 'string' && parameters.width,
+                    height: typeof parameters !== 'string' && parameters.height,
                 },
                 responseType: 'arraybuffer',
             };
@@ -37105,8 +36255,9 @@ class IssueAttachments {
     }
     getAttachment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/${parameters.id}`,
+                url: `/rest/api/3/attachment/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -37114,8 +36265,9 @@ class IssueAttachments {
     }
     removeAttachment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/${parameters.id}`,
+                url: `/rest/api/3/attachment/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -37123,8 +36275,9 @@ class IssueAttachments {
     }
     expandAttachmentForHumans(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/${parameters.id}/expand/human`,
+                url: `/rest/api/3/attachment/${id}/expand/human`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -37132,8 +36285,9 @@ class IssueAttachments {
     }
     expandAttachmentForMachines(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/attachment/${parameters.id}/expand/raw`,
+                url: `/rest/api/3/attachment/${id}/expand/raw`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -37176,8 +36330,9 @@ class IssueCommentProperties {
     }
     getCommentPropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const commentId = typeof parameters === 'string' ? parameters : parameters.commentId;
             const config = {
-                url: `/rest/api/3/comment/${parameters.commentId}/properties`,
+                url: `/rest/api/3/comment/${commentId}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -37197,6 +36352,7 @@ class IssueCommentProperties {
             const config = {
                 url: `/rest/api/3/comment/${parameters.commentId}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -37234,10 +36390,10 @@ class IssueComments {
                 url: '/rest/api/3/comment/list',
                 method: 'POST',
                 params: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                    expand: parameters.expand,
                 },
                 data: {
-                    ids: parameters === null || parameters === void 0 ? void 0 : parameters.ids,
+                    ids: parameters.ids,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37245,14 +36401,15 @@ class IssueComments {
     }
     getComments(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const issueIdOrKey = typeof parameters === 'string' ? parameters : parameters.issueIdOrKey;
             const config = {
-                url: `/rest/api/3/issue/${parameters.issueIdOrKey}/comment`,
+                url: `/rest/api/3/issue/${issueIdOrKey}/comment`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    orderBy: parameters.orderBy,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    orderBy: typeof parameters !== 'string' && parameters.orderBy,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37260,6 +36417,18 @@ class IssueComments {
     }
     addComment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const body = typeof parameters.body === 'string'
+                ? {
+                    type: 'doc',
+                    version: 1,
+                    content: [
+                        {
+                            type: 'paragraph',
+                            content: [{ type: 'text', text: parameters.body }],
+                        },
+                    ],
+                }
+                : parameters.body;
             const config = {
                 url: `/rest/api/3/issue/${parameters.issueIdOrKey}/comment`,
                 method: 'POST',
@@ -37270,7 +36439,7 @@ class IssueComments {
                     self: parameters.self,
                     id: parameters.id,
                     author: parameters.author,
-                    body: parameters.body,
+                    body,
                     renderedBody: parameters.renderedBody,
                     updateAuthor: parameters.updateAuthor,
                     created: parameters.created,
@@ -37298,6 +36467,7 @@ class IssueComments {
     }
     updateComment(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            // todo same above
             const config = {
                 url: `/rest/api/3/issue/${parameters.issueIdOrKey}/comment/${parameters.id}`,
                 method: 'PUT',
@@ -37344,18 +36514,19 @@ class IssueCustomFieldConfigurationApps {
     }
     getCustomFieldConfiguration(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldIdOrKey = typeof parameters === 'string' ? parameters : parameters.fieldIdOrKey;
             const config = {
-                url: `/rest/api/3/app/field/${parameters.fieldIdOrKey}/context/configuration`,
+                url: `/rest/api/3/app/field/${fieldIdOrKey}/context/configuration`,
                 method: 'GET',
                 params: {
-                    id: parameters.id,
-                    contextId: parameters.contextId,
-                    fieldContextId: parameters.fieldContextId,
-                    issueId: parameters.issueId,
-                    projectKeyOrId: parameters.projectKeyOrId,
-                    issueTypeId: parameters.issueTypeId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    id: typeof parameters !== 'string' && parameters.id,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    fieldContextId: typeof parameters !== 'string' && parameters.fieldContextId,
+                    issueId: typeof parameters !== 'string' && parameters.issueId,
+                    projectKeyOrId: typeof parameters !== 'string' && parameters.projectKeyOrId,
+                    issueTypeId: typeof parameters !== 'string' && parameters.issueTypeId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37393,15 +36564,16 @@ class IssueCustomFieldContexts {
     }
     getContextsForField(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldId}/context`,
+                url: `/rest/api/3/field/${fieldId}/context`,
                 method: 'GET',
                 params: {
-                    isAnyIssueType: parameters.isAnyIssueType,
-                    isGlobalContext: parameters.isGlobalContext,
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    isAnyIssueType: typeof parameters !== 'string' && parameters.isAnyIssueType,
+                    isGlobalContext: typeof parameters !== 'string' && parameters.isGlobalContext,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37425,13 +36597,14 @@ class IssueCustomFieldContexts {
     }
     getDefaultValues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldId}/context/defaultValue`,
+                url: `/rest/api/3/field/${fieldId}/context/defaultValue`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37451,13 +36624,14 @@ class IssueCustomFieldContexts {
     }
     getIssueTypeMappingsForContexts(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldId}/context/issuetypemapping`,
+                url: `/rest/api/3/field/${fieldId}/context/issuetypemapping`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37481,13 +36655,14 @@ class IssueCustomFieldContexts {
     }
     getProjectContextMapping(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldId}/context/projectmapping`,
+                url: `/rest/api/3/field/${fieldId}/context/projectmapping`,
                 method: 'GET',
                 params: {
-                    contextId: parameters.contextId,
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    contextId: typeof parameters !== 'string' && parameters.contextId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37583,12 +36758,13 @@ class IssueCustomFieldOptions {
     }
     getOptionsForField(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/customField/${parameters.fieldId}/option`,
+                url: `/rest/api/3/customField/${fieldId}/option`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37620,8 +36796,9 @@ class IssueCustomFieldOptions {
     }
     getCustomFieldOption(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/customFieldOption/${parameters.id}`,
+                url: `/rest/api/3/customFieldOption/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -37709,12 +36886,13 @@ class IssueCustomFieldOptionsApps {
     }
     getAllIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldKey}/option`,
+                url: `/rest/api/3/field/${fieldKey}/option`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37736,13 +36914,14 @@ class IssueCustomFieldOptionsApps {
     }
     getSelectableIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldKey}/option/suggestions/edit`,
+                url: `/rest/api/3/field/${fieldKey}/option/suggestions/edit`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    projectId: parameters.projectId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    projectId: typeof parameters !== 'string' && parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37750,13 +36929,14 @@ class IssueCustomFieldOptionsApps {
     }
     getVisibleIssueFieldOptions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldKey = typeof parameters === 'string' ? parameters : parameters.fieldKey;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldKey}/option/suggestions/search`,
+                url: `/rest/api/3/field/${fieldKey}/option/suggestions/search`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    projectId: parameters.projectId,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    projectId: typeof parameters !== 'string' && parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -37834,10 +37014,10 @@ class IssueCustomFieldValuesApps {
                 url: '/rest/api/3/app/field/value',
                 method: 'POST',
                 params: {
-                    generateChangelog: parameters === null || parameters === void 0 ? void 0 : parameters.generateChangelog,
+                    generateChangelog: parameters.generateChangelog,
                 },
                 data: {
-                    updates: parameters === null || parameters === void 0 ? void 0 : parameters.updates,
+                    updates: parameters.updates,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -38136,6 +37316,7 @@ class IssueFields {
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
                     id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
                     query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
+                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
                     orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
                 },
             };
@@ -38386,7 +37567,39 @@ class IssueNotificationSchemes {
                 params: {
                     startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
                     expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    createNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/notificationscheme',
+                method: 'POST',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                    notificationSchemeEvents: parameters.notificationSchemeEvents,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getNotificationSchemeToProjectMappings(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/notificationscheme/project',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    notificationSchemeId: parameters === null || parameters === void 0 ? void 0 : parameters.notificationSchemeId,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -38394,12 +37607,56 @@ class IssueNotificationSchemes {
     }
     getNotificationScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/notificationscheme/${parameters.id}`,
+                url: `/rest/api/3/notificationscheme/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/notificationscheme/${parameters.id}`,
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addNotifications(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/notificationscheme/${parameters.id}/notification`,
+                method: 'PUT',
+                data: {
+                    notificationSchemeEvents: parameters.notificationSchemeEvents,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/notificationscheme/${parameters.notificationSchemeId}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeNotificationFromNotificationScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/notificationscheme/${parameters.notificationSchemeId}/notification/${parameters.notificationId}`,
+                method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
         });
@@ -38458,6 +37715,20 @@ class IssuePriorities {
             return this.client.sendRequest(config, callback);
         });
     }
+    movePriorities(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/priority/move',
+                method: 'PUT',
+                data: {
+                    ids: parameters === null || parameters === void 0 ? void 0 : parameters.ids,
+                    after: parameters === null || parameters === void 0 ? void 0 : parameters.after,
+                    position: parameters === null || parameters === void 0 ? void 0 : parameters.position,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     searchPriorities(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
@@ -38492,6 +37763,19 @@ class IssuePriorities {
                     description: parameters.description,
                     iconUrl: parameters.iconUrl,
                     statusColor: parameters.statusColor,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deletePriority(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/priority/${parameters.id}`,
+                method: 'DELETE',
+                params: {
+                    newPriority: parameters.newPriority,
+                    replaceWith: parameters.replaceWith,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -38590,6 +37874,7 @@ class IssueProperties {
             const config = {
                 url: `/rest/api/3/issue/${parameters.issueIdOrKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.propertyValue,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -38720,11 +38005,84 @@ class IssueResolutions {
             return this.client.sendRequest(config, callback);
         });
     }
+    createResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/resolution',
+                method: 'POST',
+                data: parameters,
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    setDefaultResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/resolution/default',
+                method: 'PUT',
+                data: {
+                    id: parameters.id,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    moveResolutions(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/resolution/move',
+                method: 'PUT',
+                data: {
+                    ids: parameters.ids,
+                    after: parameters.after,
+                    position: parameters.position,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchResolutions(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/resolution/search',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     getResolution(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/api/3/resolution/${parameters.id}`,
                 method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/resolution/${parameters.id}`,
+                method: 'PUT',
+                data: Object.assign(Object.assign({}, parameters), { name: parameters.name, description: parameters.description, id: undefined }),
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteResolution(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/resolution/${parameters.id}`,
+                method: 'DELETE',
+                params: {
+                    replaceWith: parameters.replaceWith,
+                },
             };
             return this.client.sendRequest(config, callback);
         });
@@ -38884,11 +38242,180 @@ class IssueSecuritySchemes {
             return this.client.sendRequest(config, callback);
         });
     }
+    createIssueSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes',
+                method: 'POST',
+                data: {
+                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    levels: parameters === null || parameters === void 0 ? void 0 : parameters.levels,
+                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getSecurityLevels(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes/level',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    schemeId: parameters === null || parameters === void 0 ? void 0 : parameters.schemeId,
+                    onlyDefault: parameters === null || parameters === void 0 ? void 0 : parameters.onlyDefault,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    setDefaultLevels(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes/level/default',
+                method: 'PUT',
+                data: {
+                    defaultValues: parameters === null || parameters === void 0 ? void 0 : parameters.defaultValues,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getSecurityLevelMembers(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes/level/member',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    schemeId: parameters === null || parameters === void 0 ? void 0 : parameters.schemeId,
+                    levelId: parameters === null || parameters === void 0 ? void 0 : parameters.levelId,
+                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchProjectsUsingSecuritySchemes(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes/project',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    issueSecuritySchemeId: parameters === null || parameters === void 0 ? void 0 : parameters.issueSecuritySchemeId,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    searchSecuritySchemes(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/issuesecurityschemes/search',
+                method: 'GET',
+                params: {
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
     getIssueSecurityScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
             const config = {
                 url: `/rest/api/3/issuesecurityschemes/${parameters.id}`,
                 method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateIssueSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.id}`,
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    deleteSecurityScheme(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}`,
+                method: 'DELETE',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}/level`,
+                method: 'PUT',
+                data: {
+                    levels: parameters.levels,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updateSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}`,
+                method: 'PUT',
+                data: {
+                    description: parameters.description,
+                    name: parameters.name,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}`,
+                method: 'DELETE',
+                params: {
+                    replaceWith: parameters.replaceWith,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    addSecurityLevelMembers(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}/member`,
+                method: 'PUT',
+                data: {
+                    members: parameters.members,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    removeMemberFromSecurityLevel(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/issuesecurityschemes/${parameters.schemeId}/level/${parameters.levelId}/member/${parameters.memberId}`,
+                method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
         });
@@ -40121,6 +39648,34 @@ class JQL {
             return this.client.sendRequest(config, callback);
         });
     }
+    getPrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/jql/function/computation',
+                method: 'GET',
+                params: {
+                    functionKey: parameters === null || parameters === void 0 ? void 0 : parameters.functionKey,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
+                    filter: parameters === null || parameters === void 0 ? void 0 : parameters.filter,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updatePrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/jql/function/computation',
+                method: 'POST',
+                data: {
+                    values: parameters.values,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
 }
 exports.JQL = JQL;
 //# sourceMappingURL=jQL.js.map
@@ -40237,6 +39792,52 @@ exports.JiraSettings = JiraSettings;
 
 /***/ }),
 
+/***/ 62541:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.JqlFunctionsApps = void 0;
+const tslib_1 = __nccwpck_require__(89106);
+class JqlFunctionsApps {
+    constructor(client) {
+        this.client = client;
+    }
+    getPrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/jql/function/computation',
+                method: 'GET',
+                params: {
+                    functionKey: parameters === null || parameters === void 0 ? void 0 : parameters.functionKey,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
+                    filter: parameters === null || parameters === void 0 ? void 0 : parameters.filter,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    updatePrecomputations(parameters, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/jql/function/computation',
+                method: 'POST',
+                data: {
+                    values: parameters === null || parameters === void 0 ? void 0 : parameters.values,
+                },
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+}
+exports.JqlFunctionsApps = JqlFunctionsApps;
+//# sourceMappingURL=jqlFunctionsApps.js.map
+
+/***/ }),
+
 /***/ 67834:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -40265,6 +39866,42 @@ class Labels {
 }
 exports.Labels = Labels;
 //# sourceMappingURL=labels.js.map
+
+/***/ }),
+
+/***/ 75584:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LicenseMetrics = void 0;
+const tslib_1 = __nccwpck_require__(89106);
+class LicenseMetrics {
+    constructor(client) {
+        this.client = client;
+    }
+    getApproximateLicenseCount(callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: '/rest/api/3/license/approximateLicenseCount',
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+    getApproximateApplicationLicenseCount(applicationKey, callback) {
+        return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const config = {
+                url: `/rest/api/3/license/approximateLicenseCount/product/${applicationKey}`,
+                method: 'GET',
+            };
+            return this.client.sendRequest(config, callback);
+        });
+    }
+}
+exports.LicenseMetrics = LicenseMetrics;
+//# sourceMappingURL=licenseMetrics.js.map
 
 /***/ }),
 
@@ -40305,6 +39942,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=addGroup.js.map
+
+/***/ }),
+
+/***/ 88588:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addNotificationsDetails.js.map
+
+/***/ }),
+
+/***/ 38026:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecuritySchemeLevelsRequest.js.map
 
 /***/ }),
 
@@ -40818,6 +40475,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 36554:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=containerForProjectFeatures.js.map
+
+/***/ }),
+
 /***/ 51738:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -40918,6 +40585,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 87246:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createIssueSecuritySchemeDetails.js.map
+
+/***/ }),
+
+/***/ 15605:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createNotificationSchemeDetails.js.map
+
+/***/ }),
+
 /***/ 84702:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -40935,6 +40622,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createProjectDetails.js.map
+
+/***/ }),
+
+/***/ 93241:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createResolutionDetails.js.map
 
 /***/ }),
 
@@ -41345,6 +41042,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=dashboardUser.js.map
+
+/***/ }),
+
+/***/ 98817:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=defaultLevelValue.js.map
 
 /***/ }),
 
@@ -41919,6 +41626,8 @@ tslib_1.__exportStar(__nccwpck_require__(18468), exports);
 tslib_1.__exportStar(__nccwpck_require__(12757), exports);
 tslib_1.__exportStar(__nccwpck_require__(99295), exports);
 tslib_1.__exportStar(__nccwpck_require__(69520), exports);
+tslib_1.__exportStar(__nccwpck_require__(88588), exports);
+tslib_1.__exportStar(__nccwpck_require__(38026), exports);
 tslib_1.__exportStar(__nccwpck_require__(41209), exports);
 tslib_1.__exportStar(__nccwpck_require__(373), exports);
 tslib_1.__exportStar(__nccwpck_require__(47894), exports);
@@ -41970,6 +41679,7 @@ tslib_1.__exportStar(__nccwpck_require__(35792), exports);
 tslib_1.__exportStar(__nccwpck_require__(26832), exports);
 tslib_1.__exportStar(__nccwpck_require__(44977), exports);
 tslib_1.__exportStar(__nccwpck_require__(65095), exports);
+tslib_1.__exportStar(__nccwpck_require__(36554), exports);
 tslib_1.__exportStar(__nccwpck_require__(51738), exports);
 tslib_1.__exportStar(__nccwpck_require__(41001), exports);
 tslib_1.__exportStar(__nccwpck_require__(76574), exports);
@@ -41982,8 +41692,11 @@ tslib_1.__exportStar(__nccwpck_require__(89618), exports);
 tslib_1.__exportStar(__nccwpck_require__(9155), exports);
 tslib_1.__exportStar(__nccwpck_require__(31232), exports);
 tslib_1.__exportStar(__nccwpck_require__(18142), exports);
+tslib_1.__exportStar(__nccwpck_require__(87246), exports);
+tslib_1.__exportStar(__nccwpck_require__(15605), exports);
 tslib_1.__exportStar(__nccwpck_require__(84702), exports);
 tslib_1.__exportStar(__nccwpck_require__(71476), exports);
+tslib_1.__exportStar(__nccwpck_require__(93241), exports);
 tslib_1.__exportStar(__nccwpck_require__(26343), exports);
 tslib_1.__exportStar(__nccwpck_require__(96698), exports);
 tslib_1.__exportStar(__nccwpck_require__(77394), exports);
@@ -42023,6 +41736,7 @@ tslib_1.__exportStar(__nccwpck_require__(63815), exports);
 tslib_1.__exportStar(__nccwpck_require__(54789), exports);
 tslib_1.__exportStar(__nccwpck_require__(12746), exports);
 tslib_1.__exportStar(__nccwpck_require__(60149), exports);
+tslib_1.__exportStar(__nccwpck_require__(98817), exports);
 tslib_1.__exportStar(__nccwpck_require__(67322), exports);
 tslib_1.__exportStar(__nccwpck_require__(79111), exports);
 tslib_1.__exportStar(__nccwpck_require__(9186), exports);
@@ -42106,6 +41820,7 @@ tslib_1.__exportStar(__nccwpck_require__(50502), exports);
 tslib_1.__exportStar(__nccwpck_require__(20332), exports);
 tslib_1.__exportStar(__nccwpck_require__(62896), exports);
 tslib_1.__exportStar(__nccwpck_require__(86373), exports);
+tslib_1.__exportStar(__nccwpck_require__(34375), exports);
 tslib_1.__exportStar(__nccwpck_require__(27128), exports);
 tslib_1.__exportStar(__nccwpck_require__(15518), exports);
 tslib_1.__exportStar(__nccwpck_require__(81938), exports);
@@ -42153,6 +41868,10 @@ tslib_1.__exportStar(__nccwpck_require__(62008), exports);
 tslib_1.__exportStar(__nccwpck_require__(34668), exports);
 tslib_1.__exportStar(__nccwpck_require__(40243), exports);
 tslib_1.__exportStar(__nccwpck_require__(58524), exports);
+tslib_1.__exportStar(__nccwpck_require__(53974), exports);
+tslib_1.__exportStar(__nccwpck_require__(11917), exports);
+tslib_1.__exportStar(__nccwpck_require__(37881), exports);
+tslib_1.__exportStar(__nccwpck_require__(53309), exports);
 tslib_1.__exportStar(__nccwpck_require__(31485), exports);
 tslib_1.__exportStar(__nccwpck_require__(95189), exports);
 tslib_1.__exportStar(__nccwpck_require__(18880), exports);
@@ -42173,6 +41892,7 @@ tslib_1.__exportStar(__nccwpck_require__(30647), exports);
 tslib_1.__exportStar(__nccwpck_require__(51414), exports);
 tslib_1.__exportStar(__nccwpck_require__(82206), exports);
 tslib_1.__exportStar(__nccwpck_require__(47620), exports);
+tslib_1.__exportStar(__nccwpck_require__(27657), exports);
 tslib_1.__exportStar(__nccwpck_require__(39022), exports);
 tslib_1.__exportStar(__nccwpck_require__(41806), exports);
 tslib_1.__exportStar(__nccwpck_require__(46656), exports);
@@ -42192,7 +41912,13 @@ tslib_1.__exportStar(__nccwpck_require__(63020), exports);
 tslib_1.__exportStar(__nccwpck_require__(26274), exports);
 tslib_1.__exportStar(__nccwpck_require__(38744), exports);
 tslib_1.__exportStar(__nccwpck_require__(44300), exports);
+tslib_1.__exportStar(__nccwpck_require__(94805), exports);
+tslib_1.__exportStar(__nccwpck_require__(19423), exports);
 tslib_1.__exportStar(__nccwpck_require__(85086), exports);
+tslib_1.__exportStar(__nccwpck_require__(38138), exports);
+tslib_1.__exportStar(__nccwpck_require__(30197), exports);
+tslib_1.__exportStar(__nccwpck_require__(92710), exports);
+tslib_1.__exportStar(__nccwpck_require__(6210), exports);
 tslib_1.__exportStar(__nccwpck_require__(37527), exports);
 tslib_1.__exportStar(__nccwpck_require__(63841), exports);
 tslib_1.__exportStar(__nccwpck_require__(6221), exports);
@@ -42222,6 +41948,7 @@ tslib_1.__exportStar(__nccwpck_require__(90689), exports);
 tslib_1.__exportStar(__nccwpck_require__(34858), exports);
 tslib_1.__exportStar(__nccwpck_require__(55572), exports);
 tslib_1.__exportStar(__nccwpck_require__(48767), exports);
+tslib_1.__exportStar(__nccwpck_require__(27140), exports);
 tslib_1.__exportStar(__nccwpck_require__(92770), exports);
 tslib_1.__exportStar(__nccwpck_require__(81977), exports);
 tslib_1.__exportStar(__nccwpck_require__(67492), exports);
@@ -42229,6 +41956,7 @@ tslib_1.__exportStar(__nccwpck_require__(41593), exports);
 tslib_1.__exportStar(__nccwpck_require__(12120), exports);
 tslib_1.__exportStar(__nccwpck_require__(96043), exports);
 tslib_1.__exportStar(__nccwpck_require__(34543), exports);
+tslib_1.__exportStar(__nccwpck_require__(48068), exports);
 tslib_1.__exportStar(__nccwpck_require__(4787), exports);
 tslib_1.__exportStar(__nccwpck_require__(23151), exports);
 tslib_1.__exportStar(__nccwpck_require__(17838), exports);
@@ -42238,9 +41966,13 @@ tslib_1.__exportStar(__nccwpck_require__(64080), exports);
 tslib_1.__exportStar(__nccwpck_require__(13266), exports);
 tslib_1.__exportStar(__nccwpck_require__(17007), exports);
 tslib_1.__exportStar(__nccwpck_require__(87763), exports);
+tslib_1.__exportStar(__nccwpck_require__(45631), exports);
 tslib_1.__exportStar(__nccwpck_require__(63098), exports);
 tslib_1.__exportStar(__nccwpck_require__(2427), exports);
 tslib_1.__exportStar(__nccwpck_require__(62062), exports);
+tslib_1.__exportStar(__nccwpck_require__(14128), exports);
+tslib_1.__exportStar(__nccwpck_require__(50678), exports);
+tslib_1.__exportStar(__nccwpck_require__(8466), exports);
 tslib_1.__exportStar(__nccwpck_require__(65942), exports);
 tslib_1.__exportStar(__nccwpck_require__(26670), exports);
 tslib_1.__exportStar(__nccwpck_require__(42462), exports);
@@ -42267,6 +41999,7 @@ tslib_1.__exportStar(__nccwpck_require__(12679), exports);
 tslib_1.__exportStar(__nccwpck_require__(79673), exports);
 tslib_1.__exportStar(__nccwpck_require__(36413), exports);
 tslib_1.__exportStar(__nccwpck_require__(84504), exports);
+tslib_1.__exportStar(__nccwpck_require__(13026), exports);
 tslib_1.__exportStar(__nccwpck_require__(34803), exports);
 tslib_1.__exportStar(__nccwpck_require__(95748), exports);
 tslib_1.__exportStar(__nccwpck_require__(94987), exports);
@@ -42308,7 +42041,10 @@ tslib_1.__exportStar(__nccwpck_require__(94220), exports);
 tslib_1.__exportStar(__nccwpck_require__(28949), exports);
 tslib_1.__exportStar(__nccwpck_require__(85424), exports);
 tslib_1.__exportStar(__nccwpck_require__(65524), exports);
+tslib_1.__exportStar(__nccwpck_require__(28855), exports);
+tslib_1.__exportStar(__nccwpck_require__(98590), exports);
 tslib_1.__exportStar(__nccwpck_require__(38581), exports);
+tslib_1.__exportStar(__nccwpck_require__(51240), exports);
 tslib_1.__exportStar(__nccwpck_require__(89144), exports);
 tslib_1.__exportStar(__nccwpck_require__(79906), exports);
 tslib_1.__exportStar(__nccwpck_require__(33027), exports);
@@ -42331,10 +42067,18 @@ tslib_1.__exportStar(__nccwpck_require__(24815), exports);
 tslib_1.__exportStar(__nccwpck_require__(80465), exports);
 tslib_1.__exportStar(__nccwpck_require__(33095), exports);
 tslib_1.__exportStar(__nccwpck_require__(79234), exports);
+tslib_1.__exportStar(__nccwpck_require__(72341), exports);
 tslib_1.__exportStar(__nccwpck_require__(58838), exports);
+tslib_1.__exportStar(__nccwpck_require__(54108), exports);
+tslib_1.__exportStar(__nccwpck_require__(22826), exports);
+tslib_1.__exportStar(__nccwpck_require__(4518), exports);
+tslib_1.__exportStar(__nccwpck_require__(87629), exports);
 tslib_1.__exportStar(__nccwpck_require__(51430), exports);
+tslib_1.__exportStar(__nccwpck_require__(6922), exports);
 tslib_1.__exportStar(__nccwpck_require__(89417), exports);
+tslib_1.__exportStar(__nccwpck_require__(51370), exports);
 tslib_1.__exportStar(__nccwpck_require__(12929), exports);
+tslib_1.__exportStar(__nccwpck_require__(99234), exports);
 tslib_1.__exportStar(__nccwpck_require__(43515), exports);
 tslib_1.__exportStar(__nccwpck_require__(98767), exports);
 tslib_1.__exportStar(__nccwpck_require__(48628), exports);
@@ -42357,7 +42101,7 @@ tslib_1.__exportStar(__nccwpck_require__(14649), exports);
 tslib_1.__exportStar(__nccwpck_require__(43389), exports);
 tslib_1.__exportStar(__nccwpck_require__(54104), exports);
 tslib_1.__exportStar(__nccwpck_require__(55573), exports);
-tslib_1.__exportStar(__nccwpck_require__(44748), exports);
+tslib_1.__exportStar(__nccwpck_require__(85062), exports);
 tslib_1.__exportStar(__nccwpck_require__(47187), exports);
 tslib_1.__exportStar(__nccwpck_require__(69467), exports);
 tslib_1.__exportStar(__nccwpck_require__(59756), exports);
@@ -42371,8 +42115,12 @@ tslib_1.__exportStar(__nccwpck_require__(88396), exports);
 tslib_1.__exportStar(__nccwpck_require__(82055), exports);
 tslib_1.__exportStar(__nccwpck_require__(19109), exports);
 tslib_1.__exportStar(__nccwpck_require__(19046), exports);
+tslib_1.__exportStar(__nccwpck_require__(8956), exports);
+tslib_1.__exportStar(__nccwpck_require__(72301), exports);
+tslib_1.__exportStar(__nccwpck_require__(54569), exports);
 tslib_1.__exportStar(__nccwpck_require__(5927), exports);
 tslib_1.__exportStar(__nccwpck_require__(99928), exports);
+tslib_1.__exportStar(__nccwpck_require__(74223), exports);
 tslib_1.__exportStar(__nccwpck_require__(47386), exports);
 tslib_1.__exportStar(__nccwpck_require__(41822), exports);
 tslib_1.__exportStar(__nccwpck_require__(89689), exports);
@@ -42678,6 +42426,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=issueSecurityLevelMember.js.map
+
+/***/ }),
+
+/***/ 34375:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=issueSecuritySchemeToProjectMapping.js.map
 
 /***/ }),
 
@@ -43191,6 +42949,46 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 53974:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputation.js.map
+
+/***/ }),
+
+/***/ 11917:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputationPage.js.map
+
+/***/ }),
+
+/***/ 37881:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputationUpdate.js.map
+
+/***/ }),
+
+/***/ 53309:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=jqlFunctionPrecomputationUpdateRequest.js.map
+
+/***/ }),
+
 /***/ 95189:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -43348,6 +43146,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=license.js.map
+
+/***/ }),
+
+/***/ 27657:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=licenseMetric.js.map
 
 /***/ }),
 
@@ -43551,6 +43359,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 94805:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeAndProjectMapping.js.map
+
+/***/ }),
+
+/***/ 19423:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeAndProjectMappingPage.js.map
+
+/***/ }),
+
 /***/ 85086:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -43558,6 +43386,46 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=notificationSchemeEvent.js.map
+
+/***/ }),
+
+/***/ 38138:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeEventDetails.js.map
+
+/***/ }),
+
+/***/ 30197:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeEventTypeId.js.map
+
+/***/ }),
+
+/***/ 92710:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeId.js.map
+
+/***/ }),
+
+/***/ 6210:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=notificationSchemeNotificationDetails.js.map
 
 /***/ }),
 
@@ -43841,6 +43709,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 27140:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageIssueSecuritySchemeToProjectMapping.js.map
+
+/***/ }),
+
 /***/ 92770:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -43908,6 +43786,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=pageIssueTypeToContextMapping.js.map
+
+/***/ }),
+
+/***/ 48068:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageJqlFunctionPrecomputation.js.map
 
 /***/ }),
 
@@ -44001,6 +43889,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 45631:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageResolution.js.map
+
+/***/ }),
+
 /***/ 63098:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -44028,6 +43926,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=pageScreenWithTab.js.map
+
+/***/ }),
+
+/***/ 14128:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecurityLevel.js.map
+
+/***/ }),
+
+/***/ 50678:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecurityLevelMember.js.map
+
+/***/ }),
+
+/***/ 8466:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=pageSecuritySchemeWithProjects.js.map
 
 /***/ }),
 
@@ -44288,7 +44216,7 @@ var Project;
         Expand["ProjectKeys"] = "projectKeys";
         Expand["IssueTypeHierarchy"] = "issueTypeHierarchy";
     })(Expand = Project.Expand || (Project.Expand = {}));
-})(Project = exports.Project || (exports.Project = {}));
+})(Project || (exports.Project = Project = {}));
 //# sourceMappingURL=project.js.map
 
 /***/ }),
@@ -44310,6 +44238,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=projectCategory.js.map
+
+/***/ }),
+
+/***/ 13026:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=projectComponent.js.map
 
 /***/ }),
 
@@ -44723,6 +44661,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 28855:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=reorderIssuePriorities.js.map
+
+/***/ }),
+
+/***/ 98590:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=reorderIssueResolutionsRequest.js.map
+
+/***/ }),
+
 /***/ 38581:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -44730,6 +44688,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=resolution.js.map
+
+/***/ }),
+
+/***/ 51240:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=resolutionId.js.map
 
 /***/ }),
 
@@ -44953,6 +44921,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 72341:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securityLevelMember.js.map
+
+/***/ }),
+
 /***/ 58838:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -44960,6 +44938,56 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=securityScheme.js.map
+
+/***/ }),
+
+/***/ 54108:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeId.js.map
+
+/***/ }),
+
+/***/ 22826:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeLevel.js.map
+
+/***/ }),
+
+/***/ 4518:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeLevelMember.js.map
+
+/***/ }),
+
+/***/ 87629:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeMembersRequest.js.map
+
+/***/ }),
+
+/***/ 6922:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=securitySchemeWithProjects.js.map
 
 /***/ }),
 
@@ -44983,6 +45011,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 51370:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultLevelsRequest.js.map
+
+/***/ }),
+
 /***/ 12929:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -44990,6 +45028,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=setDefaultPriorityRequest.js.map
+
+/***/ }),
+
+/***/ 99234:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultResolutionRequest.js.map
 
 /***/ }),
 
@@ -45213,7 +45261,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
-/***/ 44748:
+/***/ 85062:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -45343,6 +45391,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 8956:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecurityLevelDetails.js.map
+
+/***/ }),
+
+/***/ 72301:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecuritySchemeRequest.js.map
+
+/***/ }),
+
+/***/ 54569:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateNotificationSchemeDetails.js.map
+
+/***/ }),
+
 /***/ 5927:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -45360,6 +45438,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updateProjectDetails.js.map
+
+/***/ }),
+
+/***/ 74223:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateResolutionDetails.js.map
 
 /***/ }),
 
@@ -46079,6 +46167,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 45026:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addNotifications.js.map
+
+/***/ }),
+
 /***/ 21974:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -46106,6 +46204,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=addScreenTabField.js.map
+
+/***/ }),
+
+/***/ 81370:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecurityLevel.js.map
+
+/***/ }),
+
+/***/ 40446:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=addSecurityLevelMembers.js.map
 
 /***/ }),
 
@@ -46159,7 +46277,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
-/***/ 37881:
+/***/ 96510:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -46509,6 +46627,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 90893:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createIssueSecurityScheme.js.map
+
+/***/ }),
+
 /***/ 97859:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -46556,6 +46684,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createIssues.js.map
+
+/***/ }),
+
+/***/ 95142:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createNotificationScheme.js.map
 
 /***/ }),
 
@@ -46636,6 +46774,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=createProjectRole.js.map
+
+/***/ }),
+
+/***/ 62710:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=createResolution.js.map
 
 /***/ }),
 
@@ -46766,6 +46914,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deleteAndReplaceVersion.js.map
+
+/***/ }),
+
+/***/ 71123:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteAppProperty.js.map
 
 /***/ }),
 
@@ -47039,6 +47197,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 72882:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteNotificationScheme.js.map
+
+/***/ }),
+
 /***/ 43455:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -47056,6 +47224,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deletePermissionSchemeEntity.js.map
+
+/***/ }),
+
+/***/ 82572:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deletePriority.js.map
 
 /***/ }),
 
@@ -47139,6 +47317,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 52319:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteResolution.js.map
+
+/***/ }),
+
 /***/ 79077:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -47166,6 +47354,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=deleteScreenTab.js.map
+
+/***/ }),
+
+/***/ 59066:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=deleteSecurityScheme.js.map
 
 /***/ }),
 
@@ -47985,7 +48183,7 @@ var GetCurrentUser;
         /** Returns the application roles the user is assigned to. */
         Expand["ApplicationRoles"] = "applicationRoles";
     })(Expand = GetCurrentUser.Expand || (GetCurrentUser.Expand = {}));
-})(GetCurrentUser = exports.GetCurrentUser || (exports.GetCurrentUser = {}));
+})(GetCurrentUser || (exports.GetCurrentUser = GetCurrentUser = {}));
 //# sourceMappingURL=getCurrentUser.js.map
 
 /***/ }),
@@ -48309,7 +48507,7 @@ var GetIssue;
          */
         Expand["VersionedRepresentations"] = "versionedRepresentations";
     })(Expand = GetIssue.Expand || (GetIssue.Expand = {}));
-})(GetIssue = exports.GetIssue || (exports.GetIssue = {}));
+})(GetIssue || (exports.GetIssue = GetIssue = {}));
 //# sourceMappingURL=getIssue.js.map
 
 /***/ }),
@@ -48574,6 +48772,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 56355:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getNotificationSchemeToProjectMappings.js.map
+
+/***/ }),
+
 /***/ 9169:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -48641,6 +48849,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=getPermittedProjects.js.map
+
+/***/ }),
+
+/***/ 94276:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getPrecomputations.js.map
 
 /***/ }),
 
@@ -48872,7 +49090,7 @@ var GetRecent;
         /** Returns the project with all available expand options. */
         Expand["All"] = "*";
     })(Expand = GetRecent.Expand || (GetRecent.Expand = {}));
-})(GetRecent = exports.GetRecent || (exports.GetRecent = {}));
+})(GetRecent || (exports.GetRecent = GetRecent = {}));
 //# sourceMappingURL=getRecent.js.map
 
 /***/ }),
@@ -48934,6 +49152,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=getScreensForField.js.map
+
+/***/ }),
+
+/***/ 70317:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getSecurityLevelMembers.js.map
+
+/***/ }),
+
+/***/ 64488:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=getSecurityLevels.js.map
 
 /***/ }),
 
@@ -49063,7 +49301,7 @@ var GetUser;
         /** Includes details of all the applications to which the user has access. */
         Expand["ApplicationRoles"] = "applicationRoles";
     })(Expand = GetUser.Expand || (GetUser.Expand = {}));
-})(GetUser = exports.GetUser || (exports.GetUser = {}));
+})(GetUser || (exports.GetUser = GetUser = {}));
 //# sourceMappingURL=getUser.js.map
 
 /***/ }),
@@ -49352,15 +49590,18 @@ tslib_1.__exportStar(__nccwpck_require__(53193), exports);
 tslib_1.__exportStar(__nccwpck_require__(26281), exports);
 tslib_1.__exportStar(__nccwpck_require__(94469), exports);
 tslib_1.__exportStar(__nccwpck_require__(20578), exports);
+tslib_1.__exportStar(__nccwpck_require__(45026), exports);
 tslib_1.__exportStar(__nccwpck_require__(21974), exports);
 tslib_1.__exportStar(__nccwpck_require__(41836), exports);
 tslib_1.__exportStar(__nccwpck_require__(808), exports);
+tslib_1.__exportStar(__nccwpck_require__(81370), exports);
+tslib_1.__exportStar(__nccwpck_require__(40446), exports);
 tslib_1.__exportStar(__nccwpck_require__(35245), exports);
 tslib_1.__exportStar(__nccwpck_require__(33858), exports);
 tslib_1.__exportStar(__nccwpck_require__(17694), exports);
 tslib_1.__exportStar(__nccwpck_require__(16430), exports);
 tslib_1.__exportStar(__nccwpck_require__(36383), exports);
-tslib_1.__exportStar(__nccwpck_require__(37881), exports);
+tslib_1.__exportStar(__nccwpck_require__(96510), exports);
 tslib_1.__exportStar(__nccwpck_require__(9234), exports);
 tslib_1.__exportStar(__nccwpck_require__(33156), exports);
 tslib_1.__exportStar(__nccwpck_require__(39740), exports);
@@ -49399,10 +49640,12 @@ tslib_1.__exportStar(__nccwpck_require__(70719), exports);
 tslib_1.__exportStar(__nccwpck_require__(69452), exports);
 tslib_1.__exportStar(__nccwpck_require__(53915), exports);
 tslib_1.__exportStar(__nccwpck_require__(65318), exports);
+tslib_1.__exportStar(__nccwpck_require__(90893), exports);
 tslib_1.__exportStar(__nccwpck_require__(97859), exports);
 tslib_1.__exportStar(__nccwpck_require__(98354), exports);
 tslib_1.__exportStar(__nccwpck_require__(54324), exports);
 tslib_1.__exportStar(__nccwpck_require__(48951), exports);
+tslib_1.__exportStar(__nccwpck_require__(95142), exports);
 tslib_1.__exportStar(__nccwpck_require__(45057), exports);
 tslib_1.__exportStar(__nccwpck_require__(51291), exports);
 tslib_1.__exportStar(__nccwpck_require__(92391), exports);
@@ -49411,6 +49654,7 @@ tslib_1.__exportStar(__nccwpck_require__(47854), exports);
 tslib_1.__exportStar(__nccwpck_require__(62583), exports);
 tslib_1.__exportStar(__nccwpck_require__(69357), exports);
 tslib_1.__exportStar(__nccwpck_require__(3087), exports);
+tslib_1.__exportStar(__nccwpck_require__(62710), exports);
 tslib_1.__exportStar(__nccwpck_require__(2678), exports);
 tslib_1.__exportStar(__nccwpck_require__(62376), exports);
 tslib_1.__exportStar(__nccwpck_require__(26901), exports);
@@ -49424,6 +49668,7 @@ tslib_1.__exportStar(__nccwpck_require__(98440), exports);
 tslib_1.__exportStar(__nccwpck_require__(12074), exports);
 tslib_1.__exportStar(__nccwpck_require__(1678), exports);
 tslib_1.__exportStar(__nccwpck_require__(84080), exports);
+tslib_1.__exportStar(__nccwpck_require__(71123), exports);
 tslib_1.__exportStar(__nccwpck_require__(20653), exports);
 tslib_1.__exportStar(__nccwpck_require__(23044), exports);
 tslib_1.__exportStar(__nccwpck_require__(71075), exports);
@@ -49452,8 +49697,10 @@ tslib_1.__exportStar(__nccwpck_require__(10562), exports);
 tslib_1.__exportStar(__nccwpck_require__(30208), exports);
 tslib_1.__exportStar(__nccwpck_require__(97579), exports);
 tslib_1.__exportStar(__nccwpck_require__(60986), exports);
+tslib_1.__exportStar(__nccwpck_require__(72882), exports);
 tslib_1.__exportStar(__nccwpck_require__(43455), exports);
 tslib_1.__exportStar(__nccwpck_require__(78115), exports);
+tslib_1.__exportStar(__nccwpck_require__(82572), exports);
 tslib_1.__exportStar(__nccwpck_require__(87584), exports);
 tslib_1.__exportStar(__nccwpck_require__(33716), exports);
 tslib_1.__exportStar(__nccwpck_require__(1817), exports);
@@ -49462,9 +49709,11 @@ tslib_1.__exportStar(__nccwpck_require__(90684), exports);
 tslib_1.__exportStar(__nccwpck_require__(43599), exports);
 tslib_1.__exportStar(__nccwpck_require__(9465), exports);
 tslib_1.__exportStar(__nccwpck_require__(74168), exports);
+tslib_1.__exportStar(__nccwpck_require__(52319), exports);
 tslib_1.__exportStar(__nccwpck_require__(79077), exports);
 tslib_1.__exportStar(__nccwpck_require__(30059), exports);
 tslib_1.__exportStar(__nccwpck_require__(35653), exports);
+tslib_1.__exportStar(__nccwpck_require__(59066), exports);
 tslib_1.__exportStar(__nccwpck_require__(57010), exports);
 tslib_1.__exportStar(__nccwpck_require__(61435), exports);
 tslib_1.__exportStar(__nccwpck_require__(33091), exports);
@@ -49604,12 +49853,14 @@ tslib_1.__exportStar(__nccwpck_require__(53842), exports);
 tslib_1.__exportStar(__nccwpck_require__(85550), exports);
 tslib_1.__exportStar(__nccwpck_require__(75762), exports);
 tslib_1.__exportStar(__nccwpck_require__(9169), exports);
+tslib_1.__exportStar(__nccwpck_require__(56355), exports);
 tslib_1.__exportStar(__nccwpck_require__(42943), exports);
 tslib_1.__exportStar(__nccwpck_require__(30433), exports);
 tslib_1.__exportStar(__nccwpck_require__(8558), exports);
 tslib_1.__exportStar(__nccwpck_require__(31937), exports);
 tslib_1.__exportStar(__nccwpck_require__(35353), exports);
 tslib_1.__exportStar(__nccwpck_require__(42181), exports);
+tslib_1.__exportStar(__nccwpck_require__(94276), exports);
 tslib_1.__exportStar(__nccwpck_require__(70901), exports);
 tslib_1.__exportStar(__nccwpck_require__(27775), exports);
 tslib_1.__exportStar(__nccwpck_require__(66263), exports);
@@ -49637,6 +49888,8 @@ tslib_1.__exportStar(__nccwpck_require__(61779), exports);
 tslib_1.__exportStar(__nccwpck_require__(29186), exports);
 tslib_1.__exportStar(__nccwpck_require__(67316), exports);
 tslib_1.__exportStar(__nccwpck_require__(30152), exports);
+tslib_1.__exportStar(__nccwpck_require__(70317), exports);
+tslib_1.__exportStar(__nccwpck_require__(64488), exports);
 tslib_1.__exportStar(__nccwpck_require__(85521), exports);
 tslib_1.__exportStar(__nccwpck_require__(86871), exports);
 tslib_1.__exportStar(__nccwpck_require__(60277), exports);
@@ -49680,6 +49933,8 @@ tslib_1.__exportStar(__nccwpck_require__(23449), exports);
 tslib_1.__exportStar(__nccwpck_require__(45903), exports);
 tslib_1.__exportStar(__nccwpck_require__(45044), exports);
 tslib_1.__exportStar(__nccwpck_require__(75641), exports);
+tslib_1.__exportStar(__nccwpck_require__(35479), exports);
+tslib_1.__exportStar(__nccwpck_require__(98459), exports);
 tslib_1.__exportStar(__nccwpck_require__(16352), exports);
 tslib_1.__exportStar(__nccwpck_require__(84810), exports);
 tslib_1.__exportStar(__nccwpck_require__(11158), exports);
@@ -49688,6 +49943,7 @@ tslib_1.__exportStar(__nccwpck_require__(60043), exports);
 tslib_1.__exportStar(__nccwpck_require__(35283), exports);
 tslib_1.__exportStar(__nccwpck_require__(37035), exports);
 tslib_1.__exportStar(__nccwpck_require__(37687), exports);
+tslib_1.__exportStar(__nccwpck_require__(41585), exports);
 tslib_1.__exportStar(__nccwpck_require__(18240), exports);
 tslib_1.__exportStar(__nccwpck_require__(83252), exports);
 tslib_1.__exportStar(__nccwpck_require__(4160), exports);
@@ -49699,8 +49955,11 @@ tslib_1.__exportStar(__nccwpck_require__(17097), exports);
 tslib_1.__exportStar(__nccwpck_require__(41274), exports);
 tslib_1.__exportStar(__nccwpck_require__(55722), exports);
 tslib_1.__exportStar(__nccwpck_require__(55722), exports);
+tslib_1.__exportStar(__nccwpck_require__(85374), exports);
 tslib_1.__exportStar(__nccwpck_require__(16953), exports);
+tslib_1.__exportStar(__nccwpck_require__(89443), exports);
 tslib_1.__exportStar(__nccwpck_require__(37938), exports);
+tslib_1.__exportStar(__nccwpck_require__(96084), exports);
 tslib_1.__exportStar(__nccwpck_require__(5360), exports);
 tslib_1.__exportStar(__nccwpck_require__(6796), exports);
 tslib_1.__exportStar(__nccwpck_require__(83759), exports);
@@ -49722,6 +49981,9 @@ tslib_1.__exportStar(__nccwpck_require__(84486), exports);
 tslib_1.__exportStar(__nccwpck_require__(71466), exports);
 tslib_1.__exportStar(__nccwpck_require__(95582), exports);
 tslib_1.__exportStar(__nccwpck_require__(4412), exports);
+tslib_1.__exportStar(__nccwpck_require__(14413), exports);
+tslib_1.__exportStar(__nccwpck_require__(38248), exports);
+tslib_1.__exportStar(__nccwpck_require__(26015), exports);
 tslib_1.__exportStar(__nccwpck_require__(92780), exports);
 tslib_1.__exportStar(__nccwpck_require__(28042), exports);
 tslib_1.__exportStar(__nccwpck_require__(11338), exports);
@@ -49729,7 +49991,9 @@ tslib_1.__exportStar(__nccwpck_require__(50101), exports);
 tslib_1.__exportStar(__nccwpck_require__(17671), exports);
 tslib_1.__exportStar(__nccwpck_require__(39670), exports);
 tslib_1.__exportStar(__nccwpck_require__(60258), exports);
+tslib_1.__exportStar(__nccwpck_require__(96198), exports);
 tslib_1.__exportStar(__nccwpck_require__(9138), exports);
+tslib_1.__exportStar(__nccwpck_require__(50694), exports);
 tslib_1.__exportStar(__nccwpck_require__(87660), exports);
 tslib_1.__exportStar(__nccwpck_require__(90082), exports);
 tslib_1.__exportStar(__nccwpck_require__(3259), exports);
@@ -49774,11 +50038,14 @@ tslib_1.__exportStar(__nccwpck_require__(2594), exports);
 tslib_1.__exportStar(__nccwpck_require__(39379), exports);
 tslib_1.__exportStar(__nccwpck_require__(32886), exports);
 tslib_1.__exportStar(__nccwpck_require__(25016), exports);
+tslib_1.__exportStar(__nccwpck_require__(82485), exports);
 tslib_1.__exportStar(__nccwpck_require__(78991), exports);
 tslib_1.__exportStar(__nccwpck_require__(2653), exports);
 tslib_1.__exportStar(__nccwpck_require__(65056), exports);
 tslib_1.__exportStar(__nccwpck_require__(46080), exports);
+tslib_1.__exportStar(__nccwpck_require__(26297), exports);
 tslib_1.__exportStar(__nccwpck_require__(54038), exports);
+tslib_1.__exportStar(__nccwpck_require__(71258), exports);
 tslib_1.__exportStar(__nccwpck_require__(81152), exports);
 tslib_1.__exportStar(__nccwpck_require__(7871), exports);
 tslib_1.__exportStar(__nccwpck_require__(10965), exports);
@@ -49786,8 +50053,10 @@ tslib_1.__exportStar(__nccwpck_require__(62082), exports);
 tslib_1.__exportStar(__nccwpck_require__(92629), exports);
 tslib_1.__exportStar(__nccwpck_require__(79048), exports);
 tslib_1.__exportStar(__nccwpck_require__(46049), exports);
+tslib_1.__exportStar(__nccwpck_require__(55104), exports);
 tslib_1.__exportStar(__nccwpck_require__(40891), exports);
 tslib_1.__exportStar(__nccwpck_require__(18026), exports);
+tslib_1.__exportStar(__nccwpck_require__(68060), exports);
 tslib_1.__exportStar(__nccwpck_require__(77503), exports);
 tslib_1.__exportStar(__nccwpck_require__(90257), exports);
 tslib_1.__exportStar(__nccwpck_require__(80993), exports);
@@ -49840,6 +50109,26 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=migrateQueries.js.map
+
+/***/ }),
+
+/***/ 35479:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=movePriorities.js.map
+
+/***/ }),
+
+/***/ 98459:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=moveResolutions.js.map
 
 /***/ }),
 
@@ -49920,6 +50209,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=putAddonProperty.js.map
+
+/***/ }),
+
+/***/ 41585:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=putAppProperty.js.map
 
 /***/ }),
 
@@ -50023,6 +50322,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 85374:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeLevel.js.map
+
+/***/ }),
+
 /***/ 16953:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50033,6 +50342,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 89443:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeMemberFromSecurityLevel.js.map
+
+/***/ }),
+
 /***/ 37938:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50040,6 +50359,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=removeModules.js.map
+
+/***/ }),
+
+/***/ 96084:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=removeNotificationFromNotificationScheme.js.map
 
 /***/ }),
 
@@ -50253,6 +50582,36 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 14413:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchProjectsUsingSecuritySchemes.js.map
+
+/***/ }),
+
+/***/ 38248:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchResolutions.js.map
+
+/***/ }),
+
+/***/ 26015:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=searchSecuritySchemes.js.map
+
+/***/ }),
+
 /***/ 92780:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50323,6 +50682,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 96198:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultLevels.js.map
+
+/***/ }),
+
 /***/ 9138:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50330,6 +50699,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=setDefaultPriority.js.map
+
+/***/ }),
+
+/***/ 50694:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=setDefaultResolution.js.map
 
 /***/ }),
 
@@ -50743,6 +51122,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 82485:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateIssueSecurityScheme.js.map
+
+/***/ }),
+
 /***/ 78991:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50783,6 +51172,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 26297:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateNotificationScheme.js.map
+
+/***/ }),
+
 /***/ 54038:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50790,6 +51189,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updatePermissionScheme.js.map
+
+/***/ }),
+
+/***/ 71258:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updatePrecomputations.js.map
 
 /***/ }),
 
@@ -50863,6 +51272,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 /***/ }),
 
+/***/ 55104:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateResolution.js.map
+
+/***/ }),
+
 /***/ 40891:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -50880,6 +51299,16 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 //# sourceMappingURL=updateScreenScheme.js.map
+
+/***/ }),
+
+/***/ 68060:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+//# sourceMappingURL=updateSecurityLevel.js.map
 
 /***/ }),
 
@@ -51211,12 +51640,12 @@ class ProjectAvatars {
                 url: `/rest/api/3/project/${parameters.projectIdOrKey}/avatar`,
                 method: 'PUT',
                 data: {
-                    id: parameters.id,
-                    owner: parameters.owner,
-                    isSystemAvatar: parameters.isSystemAvatar,
-                    isSelected: parameters.isSelected,
-                    isDeletable: parameters.isDeletable,
                     fileName: parameters.fileName,
+                    id: parameters.id,
+                    isDeletable: parameters.isDeletable,
+                    isSelected: parameters.isSelected,
+                    isSystemAvatar: parameters.isSystemAvatar,
+                    owner: parameters.owner,
                     urls: parameters.urls,
                 },
             };
@@ -51242,6 +51671,7 @@ class ProjectAvatars {
                     y: parameters.y,
                     size: parameters.size,
                 },
+                data: parameters.avatar,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -51288,10 +51718,10 @@ class ProjectCategories {
                 url: '/rest/api/3/projectCategory',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    description: parameters.description,
+                    id: parameters.id,
+                    name: parameters.name,
+                    self: parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51352,20 +51782,20 @@ class ProjectComponents {
                 url: '/rest/api/3/component',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    lead: parameters === null || parameters === void 0 ? void 0 : parameters.lead,
-                    leadUserName: parameters === null || parameters === void 0 ? void 0 : parameters.leadUserName,
-                    leadAccountId: parameters === null || parameters === void 0 ? void 0 : parameters.leadAccountId,
-                    assigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.assigneeType,
                     assignee: parameters === null || parameters === void 0 ? void 0 : parameters.assignee,
-                    realAssigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.realAssigneeType,
-                    realAssignee: parameters === null || parameters === void 0 ? void 0 : parameters.realAssignee,
+                    assigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.assigneeType,
+                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
                     isAssigneeTypeValid: parameters === null || parameters === void 0 ? void 0 : parameters.isAssigneeTypeValid,
+                    lead: parameters === null || parameters === void 0 ? void 0 : parameters.lead,
+                    leadAccountId: parameters === null || parameters === void 0 ? void 0 : parameters.leadAccountId,
+                    leadUserName: parameters === null || parameters === void 0 ? void 0 : parameters.leadUserName,
+                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
                     project: parameters === null || parameters === void 0 ? void 0 : parameters.project,
                     projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
+                    realAssignee: parameters === null || parameters === void 0 ? void 0 : parameters.realAssignee,
+                    realAssigneeType: parameters === null || parameters === void 0 ? void 0 : parameters.realAssigneeType,
+                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51462,8 +51892,9 @@ class ProjectEmail {
     }
     getProjectEmail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectId = typeof parameters === 'string' ? parameters : parameters.projectId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectId}/email`,
+                url: `/rest/api/3/project/${projectId}/email`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51502,8 +51933,9 @@ class ProjectFeatures {
     }
     getFeaturesForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/features`,
+                url: `/rest/api/3/project/${projectIdOrKey}/features`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51541,11 +51973,12 @@ class ProjectKeyAndNameValidation {
     }
     validateProjectKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters === null || parameters === void 0 ? void 0 : parameters.key;
             const config = {
                 url: '/rest/api/3/projectvalidate/key',
                 method: 'GET',
                 params: {
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
+                    key,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51553,11 +51986,12 @@ class ProjectKeyAndNameValidation {
     }
     getValidProjectKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const key = typeof parameters === 'string' ? parameters : parameters === null || parameters === void 0 ? void 0 : parameters.key;
             const config = {
                 url: '/rest/api/3/projectvalidate/validProjectKey',
                 method: 'GET',
                 params: {
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
+                    key,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51565,11 +51999,12 @@ class ProjectKeyAndNameValidation {
     }
     getValidProjectName(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const name = typeof parameters === 'string' ? parameters : parameters.name;
             const config = {
                 url: '/rest/api/3/projectvalidate/validProjectName',
                 method: 'GET',
                 params: {
-                    name: parameters.name,
+                    name,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51595,8 +52030,9 @@ class ProjectPermissionSchemes {
     }
     getProjectIssueSecurityScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectKeyOrId}/issuesecuritylevelscheme`,
+                url: `/rest/api/3/project/${projectKeyOrId}/issuesecuritylevelscheme`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51604,11 +52040,12 @@ class ProjectPermissionSchemes {
     }
     getAssignedPermissionScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectKeyOrId}/permissionscheme`,
+                url: `/rest/api/3/project/${projectKeyOrId}/permissionscheme`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51631,8 +52068,9 @@ class ProjectPermissionSchemes {
     }
     getSecurityLevelsForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectKeyOrId}/securitylevel`,
+                url: `/rest/api/3/project/${projectKeyOrId}/securitylevel`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51658,8 +52096,9 @@ class ProjectProperties {
     }
     getProjectPropertyKeys(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/properties`,
+                url: `/rest/api/3/project/${projectIdOrKey}/properties`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51679,6 +52118,7 @@ class ProjectProperties {
             const config = {
                 url: `/rest/api/3/project/${parameters.projectIdOrKey}/properties/${parameters.propertyKey}`,
                 method: 'PUT',
+                data: parameters.property,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -51752,8 +52192,9 @@ class ProjectRoleActors {
     }
     getProjectRoleActorsForRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/role/${parameters.id}/actors`,
+                url: `/rest/api/3/role/${id}/actors`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51807,8 +52248,9 @@ class ProjectRoles {
     }
     getProjectRoles(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/role`,
+                url: `/rest/api/3/project/${projectIdOrKey}/role`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51828,12 +52270,13 @@ class ProjectRoles {
     }
     getProjectRoleDetails(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/roledetails`,
+                url: `/rest/api/3/project/${projectIdOrKey}/roledetails`,
                 method: 'GET',
                 params: {
-                    currentMember: parameters.currentMember,
-                    excludeConnectAddons: parameters.excludeConnectAddons,
+                    currentMember: typeof parameters !== 'string' && parameters.currentMember,
+                    excludeConnectAddons: typeof parameters !== 'string' && parameters.excludeConnectAddons,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51854,8 +52297,8 @@ class ProjectRoles {
                 url: '/rest/api/3/role',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    name: parameters.name,
+                    description: parameters.description,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51863,8 +52306,9 @@ class ProjectRoles {
     }
     getProjectRoleById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/role/${parameters.id}`,
+                url: `/rest/api/3/role/${id}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51898,11 +52342,12 @@ class ProjectRoles {
     }
     deleteProjectRole(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/role/${parameters.id}`,
+                url: `/rest/api/3/role/${id}`,
                 method: 'DELETE',
                 params: {
-                    swap: parameters.swap,
+                    swap: typeof parameters !== 'string' && parameters.swap,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51946,8 +52391,9 @@ class ProjectTypes {
     }
     getProjectTypeByKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectTypeKey = typeof parameters === 'string' ? parameters : parameters.projectTypeKey;
             const config = {
-                url: `/rest/api/3/project/type/${parameters.projectTypeKey}`,
+                url: `/rest/api/3/project/type/${projectTypeKey}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51955,8 +52401,9 @@ class ProjectTypes {
     }
     getAccessibleProjectTypeByKey(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectTypeKey = typeof parameters === 'string' ? parameters : parameters.projectTypeKey;
             const config = {
-                url: `/rest/api/3/project/type/${parameters.projectTypeKey}/accessible`,
+                url: `/rest/api/3/project/type/${projectTypeKey}/accessible`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -51982,16 +52429,17 @@ class ProjectVersions {
     }
     getProjectVersionsPaginated(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/version`,
+                url: `/rest/api/3/project/${projectIdOrKey}/version`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    orderBy: parameters.orderBy,
-                    query: parameters.query,
-                    status: parameters.status,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    orderBy: typeof parameters !== 'string' && parameters.orderBy,
+                    query: typeof parameters !== 'string' && parameters.query,
+                    status: typeof parameters !== 'string' && parameters.status,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -51999,11 +52447,12 @@ class ProjectVersions {
     }
     getProjectVersions(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/versions`,
+                url: `/rest/api/3/project/${projectIdOrKey}/versions`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52015,23 +52464,23 @@ class ProjectVersions {
                 url: '/rest/api/3/version',
                 method: 'POST',
                 data: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    archived: parameters === null || parameters === void 0 ? void 0 : parameters.archived,
-                    released: parameters === null || parameters === void 0 ? void 0 : parameters.released,
-                    startDate: parameters === null || parameters === void 0 ? void 0 : parameters.startDate,
-                    releaseDate: parameters === null || parameters === void 0 ? void 0 : parameters.releaseDate,
-                    overdue: parameters === null || parameters === void 0 ? void 0 : parameters.overdue,
-                    userStartDate: parameters === null || parameters === void 0 ? void 0 : parameters.userStartDate,
-                    userReleaseDate: parameters === null || parameters === void 0 ? void 0 : parameters.userReleaseDate,
-                    project: parameters === null || parameters === void 0 ? void 0 : parameters.project,
-                    projectId: parameters === null || parameters === void 0 ? void 0 : parameters.projectId,
-                    moveUnfixedIssuesTo: parameters === null || parameters === void 0 ? void 0 : parameters.moveUnfixedIssuesTo,
-                    operations: parameters === null || parameters === void 0 ? void 0 : parameters.operations,
-                    issuesStatusForFixVersion: parameters === null || parameters === void 0 ? void 0 : parameters.issuesStatusForFixVersion,
+                    expand: parameters.expand,
+                    self: parameters.self,
+                    id: parameters.id,
+                    description: parameters.description,
+                    name: parameters.name,
+                    archived: parameters.archived,
+                    released: parameters.released,
+                    startDate: parameters.startDate,
+                    releaseDate: parameters.releaseDate,
+                    overdue: parameters.overdue,
+                    userStartDate: parameters.userStartDate,
+                    userReleaseDate: parameters.userReleaseDate,
+                    project: parameters.project,
+                    projectId: parameters.projectId,
+                    moveUnfixedIssuesTo: parameters.moveUnfixedIssuesTo,
+                    operations: parameters.operations,
+                    issuesStatusForFixVersion: parameters.issuesStatusForFixVersion,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52039,11 +52488,12 @@ class ProjectVersions {
     }
     getVersion(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/version/${parameters.id}`,
+                url: `/rest/api/3/version/${id}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52107,8 +52557,9 @@ class ProjectVersions {
     }
     getVersionRelatedIssues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/version/${parameters.id}/relatedIssueCounts`,
+                url: `/rest/api/3/version/${id}/relatedIssueCounts`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52130,8 +52581,9 @@ class ProjectVersions {
     }
     getVersionUnresolvedIssues(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/version/${parameters.id}/unresolvedIssueCount`,
+                url: `/rest/api/3/version/${id}/unresolvedIssueCount`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52162,8 +52614,8 @@ class Projects {
                 method: 'GET',
                 params: {
                     expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    recent: parameters === null || parameters === void 0 ? void 0 : parameters.recent,
                     properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
+                    recent: parameters === null || parameters === void 0 ? void 0 : parameters.recent,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52175,24 +52627,24 @@ class Projects {
                 url: '/rest/api/3/project',
                 method: 'POST',
                 data: {
-                    key: parameters.key,
-                    name: parameters.name,
-                    description: parameters.description,
-                    lead: parameters.lead,
-                    leadAccountId: parameters.leadAccountId,
-                    url: parameters.url,
                     assigneeType: parameters.assigneeType,
                     avatarId: parameters.avatarId,
-                    issueSecurityScheme: parameters.issueSecurityScheme,
-                    permissionScheme: parameters.permissionScheme,
-                    notificationScheme: parameters.notificationScheme,
                     categoryId: parameters.categoryId,
-                    projectTypeKey: parameters.projectTypeKey,
-                    projectTemplateKey: parameters.projectTemplateKey,
-                    workflowScheme: parameters.workflowScheme,
-                    issueTypeScreenScheme: parameters.issueTypeScreenScheme,
-                    issueTypeScheme: parameters.issueTypeScheme,
+                    description: parameters.description,
                     fieldConfigurationScheme: parameters.fieldConfigurationScheme,
+                    issueSecurityScheme: parameters.issueSecurityScheme,
+                    issueTypeScheme: parameters.issueTypeScheme,
+                    issueTypeScreenScheme: parameters.issueTypeScreenScheme,
+                    key: parameters.key,
+                    lead: parameters.lead,
+                    leadAccountId: parameters.leadAccountId,
+                    name: parameters.name,
+                    notificationScheme: parameters.notificationScheme,
+                    permissionScheme: parameters.permissionScheme,
+                    projectTemplateKey: parameters.projectTemplateKey,
+                    projectTypeKey: parameters.projectTypeKey,
+                    url: parameters.url,
+                    workflowScheme: parameters.workflowScheme,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52217,19 +52669,19 @@ class Projects {
                 url: '/rest/api/3/project/search',
                 method: 'GET',
                 params: {
-                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
-                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
-                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
+                    action: parameters === null || parameters === void 0 ? void 0 : parameters.action,
+                    categoryId: parameters === null || parameters === void 0 ? void 0 : parameters.categoryId,
+                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
                     id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
                     keys: parameters === null || parameters === void 0 ? void 0 : parameters.keys,
-                    query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
-                    typeKey: parameters === null || parameters === void 0 ? void 0 : parameters.typeKey,
-                    categoryId: parameters === null || parameters === void 0 ? void 0 : parameters.categoryId,
-                    action: parameters === null || parameters === void 0 ? void 0 : parameters.action,
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    status: parameters === null || parameters === void 0 ? void 0 : parameters.status,
+                    maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    orderBy: parameters === null || parameters === void 0 ? void 0 : parameters.orderBy,
                     properties: parameters === null || parameters === void 0 ? void 0 : parameters.properties,
                     propertyQuery: parameters === null || parameters === void 0 ? void 0 : parameters.propertyQuery,
+                    query: parameters === null || parameters === void 0 ? void 0 : parameters.query,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
+                    status: parameters === null || parameters === void 0 ? void 0 : parameters.status,
+                    typeKey: parameters === null || parameters === void 0 ? void 0 : parameters.typeKey,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52237,12 +52689,13 @@ class Projects {
     }
     getProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}`,
+                url: `/rest/api/3/project/${projectIdOrKey}`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
-                    properties: parameters.properties,
+                    expand: typeof parameters !== 'string' && parameters.expand,
+                    properties: typeof parameters !== 'string' && parameters.properties,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52257,20 +52710,20 @@ class Projects {
                     expand: parameters.expand,
                 },
                 data: {
-                    key: parameters.key,
-                    name: parameters.name,
-                    projectTypeKey: parameters.projectTypeKey,
-                    projectTemplateKey: parameters.projectTemplateKey,
-                    description: parameters.description,
-                    lead: parameters.lead,
-                    leadAccountId: parameters.leadAccountId,
-                    url: parameters.url,
                     assigneeType: parameters.assigneeType,
                     avatarId: parameters.avatarId,
-                    issueSecurityScheme: parameters.issueSecurityScheme,
-                    permissionScheme: parameters.permissionScheme,
-                    notificationScheme: parameters.notificationScheme,
                     categoryId: parameters.categoryId,
+                    description: parameters.description,
+                    issueSecurityScheme: parameters.issueSecurityScheme,
+                    key: parameters.key,
+                    lead: parameters.lead,
+                    leadAccountId: parameters.leadAccountId,
+                    name: parameters.name,
+                    notificationScheme: parameters.notificationScheme,
+                    permissionScheme: parameters.permissionScheme,
+                    projectTemplateKey: parameters.projectTemplateKey,
+                    projectTypeKey: parameters.projectTypeKey,
+                    url: parameters.url,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52278,11 +52731,12 @@ class Projects {
     }
     deleteProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}`,
+                url: `/rest/api/3/project/${projectIdOrKey}`,
                 method: 'DELETE',
                 params: {
-                    enableUndo: parameters.enableUndo,
+                    enableUndo: typeof parameters !== 'string' && parameters.enableUndo,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52290,8 +52744,9 @@ class Projects {
     }
     archiveProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/archive`,
+                url: `/rest/api/3/project/${projectIdOrKey}/archive`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -52299,8 +52754,9 @@ class Projects {
     }
     deleteProjectAsynchronously(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/delete`,
+                url: `/rest/api/3/project/${projectIdOrKey}/delete`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -52308,8 +52764,9 @@ class Projects {
     }
     restore(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/restore`,
+                url: `/rest/api/3/project/${projectIdOrKey}/restore`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -52317,8 +52774,9 @@ class Projects {
     }
     getAllStatuses(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectIdOrKey = typeof parameters === 'string' ? parameters : parameters.projectIdOrKey;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectIdOrKey}/statuses`,
+                url: `/rest/api/3/project/${projectIdOrKey}/statuses`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52335,8 +52793,9 @@ class Projects {
     }
     getHierarchy(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectId = typeof parameters === 'string' ? parameters : parameters.projectId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectId}/hierarchy`,
+                url: `/rest/api/3/project/${projectId}/hierarchy`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52344,11 +52803,12 @@ class Projects {
     }
     getNotificationSchemeForProject(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const projectKeyOrId = typeof parameters === 'string' ? parameters : parameters.projectKeyOrId;
             const config = {
-                url: `/rest/api/3/project/${parameters.projectKeyOrId}/notificationscheme`,
+                url: `/rest/api/3/project/${projectKeyOrId}/notificationscheme`,
                 method: 'GET',
                 params: {
-                    expand: parameters.expand,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52391,13 +52851,14 @@ class ScreenSchemes {
     }
     createScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const name = typeof parameters === 'string' ? parameters : parameters.name;
             const config = {
                 url: '/rest/api/3/screenscheme',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    screens: parameters === null || parameters === void 0 ? void 0 : parameters.screens,
+                    name,
+                    description: typeof parameters !== 'string' && parameters.description,
+                    screens: typeof parameters !== 'string' && parameters.screens,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52419,8 +52880,9 @@ class ScreenSchemes {
     }
     deleteScreenScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenSchemeId = typeof parameters === 'string' ? parameters : parameters.screenSchemeId;
             const config = {
-                url: `/rest/api/3/screenscheme/${parameters.screenSchemeId}`,
+                url: `/rest/api/3/screenscheme/${screenSchemeId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -52510,11 +52972,12 @@ class ScreenTabs {
     }
     getAllScreenTabs(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/3/screens/${parameters.screenId}/tabs`,
+                url: `/rest/api/3/screens/${screenId}/tabs`,
                 method: 'GET',
                 params: {
-                    projectKey: parameters.projectKey,
+                    projectKey: typeof parameters !== 'string' && parameters.projectKey,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52584,13 +53047,14 @@ class Screens {
     }
     getScreensForField(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/field/${parameters.fieldId}/screens`,
+                url: `/rest/api/3/field/${fieldId}/screens`,
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    expand: parameters.expand,
+                    startAt: typeof parameters !== 'string' && parameters.startAt,
+                    maxResults: typeof parameters !== 'string' && parameters.maxResults,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52619,8 +53083,8 @@ class Screens {
                 url: '/rest/api/3/screens',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
+                    name: parameters.name,
+                    description: parameters.description,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52628,8 +53092,9 @@ class Screens {
     }
     addFieldToDefaultScreen(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const fieldId = typeof parameters === 'string' ? parameters : parameters.fieldId;
             const config = {
-                url: `/rest/api/3/screens/addToDefault/${parameters.fieldId}`,
+                url: `/rest/api/3/screens/addToDefault/${fieldId}`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -52650,8 +53115,9 @@ class Screens {
     }
     deleteScreen(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/3/screens/${parameters.screenId}`,
+                url: `/rest/api/3/screens/${screenId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -52659,8 +53125,9 @@ class Screens {
     }
     getAvailableScreenFields(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const screenId = typeof parameters === 'string' ? parameters : parameters.screenId;
             const config = {
-                url: `/rest/api/3/screens/${parameters.screenId}/availableFields`,
+                url: `/rest/api/3/screens/${screenId}/availableFields`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52713,12 +53180,13 @@ class Status {
     }
     getStatusesById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
                 url: '/rest/api/3/statuses',
                 method: 'GET',
                 params: {
-                    expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    id,
+                    expand: typeof parameters !== 'string' && parameters.expand,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52730,8 +53198,8 @@ class Status {
                 url: '/rest/api/3/statuses',
                 method: 'POST',
                 data: {
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
-                    scope: parameters === null || parameters === void 0 ? void 0 : parameters.scope,
+                    statuses: parameters.statuses,
+                    scope: parameters.scope,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52743,7 +53211,7 @@ class Status {
                 url: '/rest/api/3/statuses',
                 method: 'PUT',
                 data: {
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
+                    statuses: parameters.statuses,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52751,11 +53219,12 @@ class Status {
     }
     deleteStatusesById(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
                 url: '/rest/api/3/statuses',
                 method: 'DELETE',
                 params: {
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
+                    id,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52798,8 +53267,9 @@ class Tasks {
     }
     getTask(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const taskId = typeof parameters === 'string' ? parameters : parameters.taskId;
             const config = {
-                url: `/rest/api/3/task/${parameters.taskId}`,
+                url: `/rest/api/3/task/${taskId}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -52807,8 +53277,9 @@ class Tasks {
     }
     cancelTask(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const taskId = typeof parameters === 'string' ? parameters : parameters.taskId;
             const config = {
-                url: `/rest/api/3/task/${parameters.taskId}/cancel`,
+                url: `/rest/api/3/task/${taskId}/cancel`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -52926,10 +53397,10 @@ class UIModificationsApps {
                 url: '/rest/api/3/uiModifications',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    data: parameters === null || parameters === void 0 ? void 0 : parameters.data,
-                    contexts: parameters === null || parameters === void 0 ? void 0 : parameters.contexts,
+                    name: parameters.name,
+                    description: parameters.description,
+                    data: parameters.data,
+                    contexts: parameters.contexts,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -52952,8 +53423,9 @@ class UIModificationsApps {
     }
     deleteUiModification(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const uiModificationId = typeof parameters === 'string' ? parameters : parameters.uiModificationId;
             const config = {
-                url: `/rest/api/3/uiModifications/${parameters.uiModificationId}`,
+                url: `/rest/api/3/uiModifications/${uiModificationId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -53015,6 +53487,7 @@ class UserProperties {
                     userKey: parameters.userKey,
                     username: parameters.username,
                 },
+                data: parameters.propertyValue,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -53047,6 +53520,7 @@ exports.UserProperties = UserProperties;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UserSearch = void 0;
 const tslib_1 = __nccwpck_require__(89106);
+const paramSerializer_1 = __nccwpck_require__(52517);
 class UserSearch {
     constructor(client) {
         this.client = client;
@@ -53118,7 +53592,7 @@ class UserSearch {
                     maxResults: parameters.maxResults,
                     showAvatar: parameters.showAvatar,
                     exclude: parameters.exclude,
-                    excludeAccountIds: parameters.excludeAccountIds,
+                    excludeAccountIds: (0, paramSerializer_1.paramSerializer)('excludeAccountIds', parameters.excludeAccountIds),
                     avatarSize: parameters.avatarSize,
                     excludeConnectUsers: parameters.excludeConnectUsers,
                 },
@@ -53215,9 +53689,9 @@ class Users {
                 method: 'GET',
                 params: {
                     accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
-                    username: parameters === null || parameters === void 0 ? void 0 : parameters.username,
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
                     expand: parameters === null || parameters === void 0 ? void 0 : parameters.expand,
+                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
+                    username: parameters === null || parameters === void 0 ? void 0 : parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53229,13 +53703,13 @@ class Users {
                 url: '/rest/api/3/user',
                 method: 'POST',
                 data: {
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    key: parameters === null || parameters === void 0 ? void 0 : parameters.key,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    password: parameters === null || parameters === void 0 ? void 0 : parameters.password,
-                    emailAddress: parameters === null || parameters === void 0 ? void 0 : parameters.emailAddress,
-                    displayName: parameters === null || parameters === void 0 ? void 0 : parameters.displayName,
-                    applicationKeys: parameters === null || parameters === void 0 ? void 0 : parameters.applicationKeys,
+                    applicationKeys: parameters.applicationKeys,
+                    displayName: parameters.displayName,
+                    emailAddress: parameters.emailAddress,
+                    key: parameters.key,
+                    name: parameters.name,
+                    password: parameters.password,
+                    self: parameters.self,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53248,8 +53722,8 @@ class Users {
                 method: 'DELETE',
                 params: {
                     accountId: parameters.accountId,
-                    username: parameters.username,
                     key: parameters.key,
+                    username: parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53261,11 +53735,11 @@ class Users {
                 url: '/rest/api/3/user/bulk',
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    username: parameters.username,
-                    key: parameters.key,
                     accountId: (0, paramSerializer_1.paramSerializer)('accountId', parameters.accountId),
+                    key: parameters.key,
+                    maxResults: parameters.maxResults,
+                    startAt: parameters.startAt,
+                    username: parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53277,10 +53751,10 @@ class Users {
                 url: '/rest/api/3/user/bulk/migration',
                 method: 'GET',
                 params: {
-                    startAt: parameters.startAt,
-                    maxResults: parameters.maxResults,
-                    username: (0, paramSerializer_1.paramSerializer)('username', parameters.username),
                     key: (0, paramSerializer_1.paramSerializer)('key', parameters.key),
+                    maxResults: parameters.maxResults,
+                    startAt: parameters.startAt,
+                    username: (0, paramSerializer_1.paramSerializer)('username', parameters.username),
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53307,6 +53781,7 @@ class Users {
                 params: {
                     accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
                 },
+                data: parameters === null || parameters === void 0 ? void 0 : parameters.columns,
             };
             return this.client.sendRequest(config, callback);
         });
@@ -53317,8 +53792,8 @@ class Users {
                 url: '/rest/api/3/user/columns',
                 method: 'DELETE',
                 params: {
-                    accountId: parameters === null || parameters === void 0 ? void 0 : parameters.accountId,
-                    username: parameters === null || parameters === void 0 ? void 0 : parameters.username,
+                    accountId: parameters.accountId,
+                    username: parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53326,11 +53801,12 @@ class Users {
     }
     getUserEmail(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const accountId = typeof parameters === 'string' ? parameters : parameters.accountId;
             const config = {
                 url: '/rest/api/3/user/email',
                 method: 'GET',
                 params: {
-                    accountId: parameters.accountId,
+                    accountId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53338,11 +53814,12 @@ class Users {
     }
     getUserEmailBulk(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const accountId = typeof parameters === 'string' ? parameters : parameters.accountId;
             const config = {
                 url: '/rest/api/3/user/email/bulk',
                 method: 'GET',
                 params: {
-                    accountId: parameters.accountId,
+                    accountId,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53355,8 +53832,8 @@ class Users {
                 method: 'GET',
                 params: {
                     accountId: parameters.accountId,
-                    username: parameters.username,
                     key: parameters.key,
+                    username: parameters.username,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53368,8 +53845,8 @@ class Users {
                 url: '/rest/api/3/users',
                 method: 'GET',
                 params: {
-                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53381,8 +53858,8 @@ class Users {
                 url: '/rest/api/3/users/search',
                 method: 'GET',
                 params: {
-                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                     maxResults: parameters === null || parameters === void 0 ? void 0 : parameters.maxResults,
+                    startAt: parameters === null || parameters === void 0 ? void 0 : parameters.startAt,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53425,8 +53902,8 @@ class Webhooks {
                 url: '/rest/api/3/webhook',
                 method: 'POST',
                 data: {
-                    webhooks: parameters === null || parameters === void 0 ? void 0 : parameters.webhooks,
-                    url: parameters === null || parameters === void 0 ? void 0 : parameters.url,
+                    webhooks: parameters.webhooks,
+                    url: parameters.url,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53438,7 +53915,7 @@ class Webhooks {
                 url: '/rest/api/3/webhook',
                 method: 'DELETE',
                 data: {
-                    webhookIds: parameters === null || parameters === void 0 ? void 0 : parameters.webhookIds,
+                    webhookIds: parameters.webhookIds,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53463,7 +53940,7 @@ class Webhooks {
                 url: '/rest/api/3/webhook/refresh',
                 method: 'PUT',
                 data: {
-                    webhookIds: parameters === null || parameters === void 0 ? void 0 : parameters.webhookIds,
+                    webhookIds: parameters.webhookIds,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53489,8 +53966,9 @@ class WorkflowSchemeDrafts {
     }
     createWorkflowSchemeDraftFromParent(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/createdraft`,
+                url: `/rest/api/3/workflowscheme/${id}/createdraft`,
                 method: 'POST',
             };
             return this.client.sendRequest(config, callback);
@@ -53498,8 +53976,9 @@ class WorkflowSchemeDrafts {
     }
     getWorkflowSchemeDraft(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/draft`,
+                url: `/rest/api/3/workflowscheme/${id}/draft`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -53523,8 +54002,9 @@ class WorkflowSchemeDrafts {
     }
     deleteWorkflowSchemeDraft(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/draft`,
+                url: `/rest/api/3/workflowscheme/${id}/draft`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -53532,8 +54012,9 @@ class WorkflowSchemeDrafts {
     }
     getDraftDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/draft/default`,
+                url: `/rest/api/3/workflowscheme/${id}/draft/default`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -53554,8 +54035,9 @@ class WorkflowSchemeDrafts {
     }
     deleteDraftDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/draft/default`,
+                url: `/rest/api/3/workflowscheme/${id}/draft/default`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -53591,14 +54073,15 @@ class WorkflowSchemeDrafts {
     }
     publishDraftWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/draft/publish`,
+                url: `/rest/api/3/workflowscheme/${id}/draft/publish`,
                 method: 'POST',
                 params: {
-                    validateOnly: parameters.validateOnly,
+                    validateOnly: typeof parameters !== 'string' && parameters.validateOnly,
                 },
                 data: {
-                    statusMappings: parameters.statusMappings,
+                    statusMappings: typeof parameters !== 'string' && parameters.statusMappings,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53732,19 +54215,19 @@ class WorkflowSchemes {
                 url: '/rest/api/3/workflowscheme',
                 method: 'POST',
                 data: {
-                    id: parameters === null || parameters === void 0 ? void 0 : parameters.id,
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    defaultWorkflow: parameters === null || parameters === void 0 ? void 0 : parameters.defaultWorkflow,
-                    issueTypeMappings: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypeMappings,
-                    originalDefaultWorkflow: parameters === null || parameters === void 0 ? void 0 : parameters.originalDefaultWorkflow,
-                    originalIssueTypeMappings: parameters === null || parameters === void 0 ? void 0 : parameters.originalIssueTypeMappings,
-                    draft: parameters === null || parameters === void 0 ? void 0 : parameters.draft,
-                    lastModifiedUser: parameters === null || parameters === void 0 ? void 0 : parameters.lastModifiedUser,
-                    lastModified: parameters === null || parameters === void 0 ? void 0 : parameters.lastModified,
-                    self: parameters === null || parameters === void 0 ? void 0 : parameters.self,
-                    updateDraftIfNeeded: parameters === null || parameters === void 0 ? void 0 : parameters.updateDraftIfNeeded,
-                    issueTypes: parameters === null || parameters === void 0 ? void 0 : parameters.issueTypes,
+                    id: parameters.id,
+                    name: parameters.name,
+                    description: parameters.description,
+                    defaultWorkflow: parameters.defaultWorkflow,
+                    issueTypeMappings: parameters.issueTypeMappings,
+                    originalDefaultWorkflow: parameters.originalDefaultWorkflow,
+                    originalIssueTypeMappings: parameters.originalIssueTypeMappings,
+                    draft: parameters.draft,
+                    lastModifiedUser: parameters.lastModifiedUser,
+                    lastModified: parameters.lastModified,
+                    self: parameters.self,
+                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    issueTypes: parameters.issueTypes,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53752,11 +54235,12 @@ class WorkflowSchemes {
     }
     getWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}`,
+                url: `/rest/api/3/workflowscheme/${id}`,
                 method: 'GET',
                 params: {
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53780,8 +54264,9 @@ class WorkflowSchemes {
     }
     deleteWorkflowScheme(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}`,
+                url: `/rest/api/3/workflowscheme/${id}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -53789,11 +54274,12 @@ class WorkflowSchemes {
     }
     getDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/default`,
+                url: `/rest/api/3/workflowscheme/${id}/default`,
                 method: 'GET',
                 params: {
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53814,11 +54300,12 @@ class WorkflowSchemes {
     }
     deleteDefaultWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/default`,
+                url: `/rest/api/3/workflowscheme/${id}/default`,
                 method: 'DELETE',
                 params: {
-                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    updateDraftIfNeeded: typeof parameters !== 'string' && parameters.updateDraftIfNeeded,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53860,12 +54347,13 @@ class WorkflowSchemes {
     }
     getWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/workflow`,
+                url: `/rest/api/3/workflowscheme/${id}/workflow`,
                 method: 'GET',
                 params: {
-                    workflowName: parameters.workflowName,
-                    returnDraftIfExists: parameters.returnDraftIfExists,
+                    workflowName: typeof parameters !== 'string' && parameters.workflowName,
+                    returnDraftIfExists: typeof parameters !== 'string' && parameters.returnDraftIfExists,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53891,12 +54379,13 @@ class WorkflowSchemes {
     }
     deleteWorkflowMapping(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const id = typeof parameters === 'string' ? parameters : parameters.id;
             const config = {
-                url: `/rest/api/3/workflowscheme/${parameters.id}/workflow`,
+                url: `/rest/api/3/workflowscheme/${id}/workflow`,
                 method: 'DELETE',
                 params: {
-                    workflowName: parameters.workflowName,
-                    updateDraftIfNeeded: parameters.updateDraftIfNeeded,
+                    workflowName: typeof parameters !== 'string' && parameters.workflowName,
+                    updateDraftIfNeeded: typeof parameters !== 'string' && parameters.updateDraftIfNeeded,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -53931,8 +54420,9 @@ class WorkflowStatusCategories {
     }
     getStatusCategory(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const idOrKey = typeof parameters === 'string' ? parameters : parameters.idOrKey;
             const config = {
-                url: `/rest/api/3/statuscategory/${parameters.idOrKey}`,
+                url: `/rest/api/3/statuscategory/${idOrKey}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -53967,8 +54457,9 @@ class WorkflowStatuses {
     }
     getStatus(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const idOrName = typeof parameters === 'string' ? parameters : parameters.idOrName;
             const config = {
-                url: `/rest/api/3/status/${parameters.idOrName}`,
+                url: `/rest/api/3/status/${idOrName}`,
                 method: 'GET',
             };
             return this.client.sendRequest(config, callback);
@@ -54094,7 +54585,7 @@ class WorkflowTransitionRules {
                 url: '/rest/api/3/workflow/rule/config',
                 method: 'PUT',
                 data: {
-                    workflows: parameters === null || parameters === void 0 ? void 0 : parameters.workflows,
+                    workflows: parameters.workflows,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -54149,10 +54640,10 @@ class Workflows {
                 url: '/rest/api/3/workflow',
                 method: 'POST',
                 data: {
-                    name: parameters === null || parameters === void 0 ? void 0 : parameters.name,
-                    description: parameters === null || parameters === void 0 ? void 0 : parameters.description,
-                    transitions: parameters === null || parameters === void 0 ? void 0 : parameters.transitions,
-                    statuses: parameters === null || parameters === void 0 ? void 0 : parameters.statuses,
+                    name: parameters.name,
+                    description: parameters.description,
+                    transitions: parameters.transitions,
+                    statuses: parameters.statuses,
                 },
             };
             return this.client.sendRequest(config, callback);
@@ -54178,8 +54669,9 @@ class Workflows {
     }
     deleteInactiveWorkflow(parameters, callback) {
         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+            const entityId = typeof parameters === 'string' ? parameters : parameters.entityId;
             const config = {
-                url: `/rest/api/3/workflow/${parameters.entityId}`,
+                url: `/rest/api/3/workflow/${entityId}`,
                 method: 'DELETE',
             };
             return this.client.sendRequest(config, callback);
@@ -77362,6 +77854,122 @@ function onceStrict (fn) {
 
 /***/ }),
 
+/***/ 63329:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var parseUrl = (__nccwpck_require__(57310).parse);
+
+var DEFAULT_PORTS = {
+  ftp: 21,
+  gopher: 70,
+  http: 80,
+  https: 443,
+  ws: 80,
+  wss: 443,
+};
+
+var stringEndsWith = String.prototype.endsWith || function(s) {
+  return s.length <= this.length &&
+    this.indexOf(s, this.length - s.length) !== -1;
+};
+
+/**
+ * @param {string|object} url - The URL, or the result from url.parse.
+ * @return {string} The URL of the proxy that should handle the request to the
+ *  given URL. If no proxy is set, this will be an empty string.
+ */
+function getProxyForUrl(url) {
+  var parsedUrl = typeof url === 'string' ? parseUrl(url) : url || {};
+  var proto = parsedUrl.protocol;
+  var hostname = parsedUrl.host;
+  var port = parsedUrl.port;
+  if (typeof hostname !== 'string' || !hostname || typeof proto !== 'string') {
+    return '';  // Don't proxy URLs without a valid scheme or host.
+  }
+
+  proto = proto.split(':', 1)[0];
+  // Stripping ports in this way instead of using parsedUrl.hostname to make
+  // sure that the brackets around IPv6 addresses are kept.
+  hostname = hostname.replace(/:\d*$/, '');
+  port = parseInt(port) || DEFAULT_PORTS[proto] || 0;
+  if (!shouldProxy(hostname, port)) {
+    return '';  // Don't proxy URLs that match NO_PROXY.
+  }
+
+  var proxy =
+    getEnv('npm_config_' + proto + '_proxy') ||
+    getEnv(proto + '_proxy') ||
+    getEnv('npm_config_proxy') ||
+    getEnv('all_proxy');
+  if (proxy && proxy.indexOf('://') === -1) {
+    // Missing scheme in proxy, default to the requested URL's scheme.
+    proxy = proto + '://' + proxy;
+  }
+  return proxy;
+}
+
+/**
+ * Determines whether a given URL should be proxied.
+ *
+ * @param {string} hostname - The host name of the URL.
+ * @param {number} port - The effective port of the URL.
+ * @returns {boolean} Whether the given URL should be proxied.
+ * @private
+ */
+function shouldProxy(hostname, port) {
+  var NO_PROXY =
+    (getEnv('npm_config_no_proxy') || getEnv('no_proxy')).toLowerCase();
+  if (!NO_PROXY) {
+    return true;  // Always proxy if NO_PROXY is not set.
+  }
+  if (NO_PROXY === '*') {
+    return false;  // Never proxy if wildcard is set.
+  }
+
+  return NO_PROXY.split(/[,\s]/).every(function(proxy) {
+    if (!proxy) {
+      return true;  // Skip zero-length hosts.
+    }
+    var parsedProxy = proxy.match(/^(.+):(\d+)$/);
+    var parsedProxyHostname = parsedProxy ? parsedProxy[1] : proxy;
+    var parsedProxyPort = parsedProxy ? parseInt(parsedProxy[2]) : 0;
+    if (parsedProxyPort && parsedProxyPort !== port) {
+      return true;  // Skip if ports don't match.
+    }
+
+    if (!/^[.*]/.test(parsedProxyHostname)) {
+      // No wildcards, so stop proxying if there is an exact match.
+      return hostname !== parsedProxyHostname;
+    }
+
+    if (parsedProxyHostname.charAt(0) === '*') {
+      // Remove leading wildcard.
+      parsedProxyHostname = parsedProxyHostname.slice(1);
+    }
+    // Stop proxying if the hostname ends with the no_proxy host.
+    return !stringEndsWith.call(hostname, parsedProxyHostname);
+  });
+}
+
+/**
+ * Get the value for an environment variable.
+ *
+ * @param {string} key - The name of the environment variable.
+ * @return {string} The value of the environment variable.
+ * @private
+ */
+function getEnv(key) {
+  return process.env[key.toLowerCase()] || process.env[key.toUpperCase()] || '';
+}
+
+exports.getProxyForUrl = getProxyForUrl;
+
+
+/***/ }),
+
 /***/ 59318:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -78917,6 +79525,4341 @@ module.exports = require("util");
 
 "use strict";
 module.exports = require("zlib");
+
+/***/ }),
+
+/***/ 88757:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+// Axios v1.6.2 Copyright (c) 2023 Matt Zabriskie and contributors
+
+
+const FormData$1 = __nccwpck_require__(64334);
+const url = __nccwpck_require__(57310);
+const proxyFromEnv = __nccwpck_require__(63329);
+const http = __nccwpck_require__(13685);
+const https = __nccwpck_require__(95687);
+const util = __nccwpck_require__(73837);
+const followRedirects = __nccwpck_require__(67707);
+const zlib = __nccwpck_require__(59796);
+const stream = __nccwpck_require__(12781);
+const EventEmitter = __nccwpck_require__(82361);
+
+function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+const FormData__default = /*#__PURE__*/_interopDefaultLegacy(FormData$1);
+const url__default = /*#__PURE__*/_interopDefaultLegacy(url);
+const http__default = /*#__PURE__*/_interopDefaultLegacy(http);
+const https__default = /*#__PURE__*/_interopDefaultLegacy(https);
+const util__default = /*#__PURE__*/_interopDefaultLegacy(util);
+const followRedirects__default = /*#__PURE__*/_interopDefaultLegacy(followRedirects);
+const zlib__default = /*#__PURE__*/_interopDefaultLegacy(zlib);
+const stream__default = /*#__PURE__*/_interopDefaultLegacy(stream);
+const EventEmitter__default = /*#__PURE__*/_interopDefaultLegacy(EventEmitter);
+
+function bind(fn, thisArg) {
+  return function wrap() {
+    return fn.apply(thisArg, arguments);
+  };
+}
+
+// utils is a library of generic helper functions non-specific to axios
+
+const {toString} = Object.prototype;
+const {getPrototypeOf} = Object;
+
+const kindOf = (cache => thing => {
+    const str = toString.call(thing);
+    return cache[str] || (cache[str] = str.slice(8, -1).toLowerCase());
+})(Object.create(null));
+
+const kindOfTest = (type) => {
+  type = type.toLowerCase();
+  return (thing) => kindOf(thing) === type
+};
+
+const typeOfTest = type => thing => typeof thing === type;
+
+/**
+ * Determine if a value is an Array
+ *
+ * @param {Object} val The value to test
+ *
+ * @returns {boolean} True if value is an Array, otherwise false
+ */
+const {isArray} = Array;
+
+/**
+ * Determine if a value is undefined
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if the value is undefined, otherwise false
+ */
+const isUndefined = typeOfTest('undefined');
+
+/**
+ * Determine if a value is a Buffer
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a Buffer, otherwise false
+ */
+function isBuffer(val) {
+  return val !== null && !isUndefined(val) && val.constructor !== null && !isUndefined(val.constructor)
+    && isFunction(val.constructor.isBuffer) && val.constructor.isBuffer(val);
+}
+
+/**
+ * Determine if a value is an ArrayBuffer
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is an ArrayBuffer, otherwise false
+ */
+const isArrayBuffer = kindOfTest('ArrayBuffer');
+
+
+/**
+ * Determine if a value is a view on an ArrayBuffer
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a view on an ArrayBuffer, otherwise false
+ */
+function isArrayBufferView(val) {
+  let result;
+  if ((typeof ArrayBuffer !== 'undefined') && (ArrayBuffer.isView)) {
+    result = ArrayBuffer.isView(val);
+  } else {
+    result = (val) && (val.buffer) && (isArrayBuffer(val.buffer));
+  }
+  return result;
+}
+
+/**
+ * Determine if a value is a String
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a String, otherwise false
+ */
+const isString = typeOfTest('string');
+
+/**
+ * Determine if a value is a Function
+ *
+ * @param {*} val The value to test
+ * @returns {boolean} True if value is a Function, otherwise false
+ */
+const isFunction = typeOfTest('function');
+
+/**
+ * Determine if a value is a Number
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a Number, otherwise false
+ */
+const isNumber = typeOfTest('number');
+
+/**
+ * Determine if a value is an Object
+ *
+ * @param {*} thing The value to test
+ *
+ * @returns {boolean} True if value is an Object, otherwise false
+ */
+const isObject = (thing) => thing !== null && typeof thing === 'object';
+
+/**
+ * Determine if a value is a Boolean
+ *
+ * @param {*} thing The value to test
+ * @returns {boolean} True if value is a Boolean, otherwise false
+ */
+const isBoolean = thing => thing === true || thing === false;
+
+/**
+ * Determine if a value is a plain Object
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a plain Object, otherwise false
+ */
+const isPlainObject = (val) => {
+  if (kindOf(val) !== 'object') {
+    return false;
+  }
+
+  const prototype = getPrototypeOf(val);
+  return (prototype === null || prototype === Object.prototype || Object.getPrototypeOf(prototype) === null) && !(Symbol.toStringTag in val) && !(Symbol.iterator in val);
+};
+
+/**
+ * Determine if a value is a Date
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a Date, otherwise false
+ */
+const isDate = kindOfTest('Date');
+
+/**
+ * Determine if a value is a File
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a File, otherwise false
+ */
+const isFile = kindOfTest('File');
+
+/**
+ * Determine if a value is a Blob
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a Blob, otherwise false
+ */
+const isBlob = kindOfTest('Blob');
+
+/**
+ * Determine if a value is a FileList
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a File, otherwise false
+ */
+const isFileList = kindOfTest('FileList');
+
+/**
+ * Determine if a value is a Stream
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a Stream, otherwise false
+ */
+const isStream = (val) => isObject(val) && isFunction(val.pipe);
+
+/**
+ * Determine if a value is a FormData
+ *
+ * @param {*} thing The value to test
+ *
+ * @returns {boolean} True if value is an FormData, otherwise false
+ */
+const isFormData = (thing) => {
+  let kind;
+  return thing && (
+    (typeof FormData === 'function' && thing instanceof FormData) || (
+      isFunction(thing.append) && (
+        (kind = kindOf(thing)) === 'formdata' ||
+        // detect form-data instance
+        (kind === 'object' && isFunction(thing.toString) && thing.toString() === '[object FormData]')
+      )
+    )
+  )
+};
+
+/**
+ * Determine if a value is a URLSearchParams object
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a URLSearchParams object, otherwise false
+ */
+const isURLSearchParams = kindOfTest('URLSearchParams');
+
+/**
+ * Trim excess whitespace off the beginning and end of a string
+ *
+ * @param {String} str The String to trim
+ *
+ * @returns {String} The String freed of excess whitespace
+ */
+const trim = (str) => str.trim ?
+  str.trim() : str.replace(/^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g, '');
+
+/**
+ * Iterate over an Array or an Object invoking a function for each item.
+ *
+ * If `obj` is an Array callback will be called passing
+ * the value, index, and complete array for each item.
+ *
+ * If 'obj' is an Object callback will be called passing
+ * the value, key, and complete object for each property.
+ *
+ * @param {Object|Array} obj The object to iterate
+ * @param {Function} fn The callback to invoke for each item
+ *
+ * @param {Boolean} [allOwnKeys = false]
+ * @returns {any}
+ */
+function forEach(obj, fn, {allOwnKeys = false} = {}) {
+  // Don't bother if no value provided
+  if (obj === null || typeof obj === 'undefined') {
+    return;
+  }
+
+  let i;
+  let l;
+
+  // Force an array if not already something iterable
+  if (typeof obj !== 'object') {
+    /*eslint no-param-reassign:0*/
+    obj = [obj];
+  }
+
+  if (isArray(obj)) {
+    // Iterate over array values
+    for (i = 0, l = obj.length; i < l; i++) {
+      fn.call(null, obj[i], i, obj);
+    }
+  } else {
+    // Iterate over object keys
+    const keys = allOwnKeys ? Object.getOwnPropertyNames(obj) : Object.keys(obj);
+    const len = keys.length;
+    let key;
+
+    for (i = 0; i < len; i++) {
+      key = keys[i];
+      fn.call(null, obj[key], key, obj);
+    }
+  }
+}
+
+function findKey(obj, key) {
+  key = key.toLowerCase();
+  const keys = Object.keys(obj);
+  let i = keys.length;
+  let _key;
+  while (i-- > 0) {
+    _key = keys[i];
+    if (key === _key.toLowerCase()) {
+      return _key;
+    }
+  }
+  return null;
+}
+
+const _global = (() => {
+  /*eslint no-undef:0*/
+  if (typeof globalThis !== "undefined") return globalThis;
+  return typeof self !== "undefined" ? self : (typeof window !== 'undefined' ? window : global)
+})();
+
+const isContextDefined = (context) => !isUndefined(context) && context !== _global;
+
+/**
+ * Accepts varargs expecting each argument to be an object, then
+ * immutably merges the properties of each object and returns result.
+ *
+ * When multiple objects contain the same key the later object in
+ * the arguments list will take precedence.
+ *
+ * Example:
+ *
+ * ```js
+ * var result = merge({foo: 123}, {foo: 456});
+ * console.log(result.foo); // outputs 456
+ * ```
+ *
+ * @param {Object} obj1 Object to merge
+ *
+ * @returns {Object} Result of all merge properties
+ */
+function merge(/* obj1, obj2, obj3, ... */) {
+  const {caseless} = isContextDefined(this) && this || {};
+  const result = {};
+  const assignValue = (val, key) => {
+    const targetKey = caseless && findKey(result, key) || key;
+    if (isPlainObject(result[targetKey]) && isPlainObject(val)) {
+      result[targetKey] = merge(result[targetKey], val);
+    } else if (isPlainObject(val)) {
+      result[targetKey] = merge({}, val);
+    } else if (isArray(val)) {
+      result[targetKey] = val.slice();
+    } else {
+      result[targetKey] = val;
+    }
+  };
+
+  for (let i = 0, l = arguments.length; i < l; i++) {
+    arguments[i] && forEach(arguments[i], assignValue);
+  }
+  return result;
+}
+
+/**
+ * Extends object a by mutably adding to it the properties of object b.
+ *
+ * @param {Object} a The object to be extended
+ * @param {Object} b The object to copy properties from
+ * @param {Object} thisArg The object to bind function to
+ *
+ * @param {Boolean} [allOwnKeys]
+ * @returns {Object} The resulting value of object a
+ */
+const extend = (a, b, thisArg, {allOwnKeys}= {}) => {
+  forEach(b, (val, key) => {
+    if (thisArg && isFunction(val)) {
+      a[key] = bind(val, thisArg);
+    } else {
+      a[key] = val;
+    }
+  }, {allOwnKeys});
+  return a;
+};
+
+/**
+ * Remove byte order marker. This catches EF BB BF (the UTF-8 BOM)
+ *
+ * @param {string} content with BOM
+ *
+ * @returns {string} content value without BOM
+ */
+const stripBOM = (content) => {
+  if (content.charCodeAt(0) === 0xFEFF) {
+    content = content.slice(1);
+  }
+  return content;
+};
+
+/**
+ * Inherit the prototype methods from one constructor into another
+ * @param {function} constructor
+ * @param {function} superConstructor
+ * @param {object} [props]
+ * @param {object} [descriptors]
+ *
+ * @returns {void}
+ */
+const inherits = (constructor, superConstructor, props, descriptors) => {
+  constructor.prototype = Object.create(superConstructor.prototype, descriptors);
+  constructor.prototype.constructor = constructor;
+  Object.defineProperty(constructor, 'super', {
+    value: superConstructor.prototype
+  });
+  props && Object.assign(constructor.prototype, props);
+};
+
+/**
+ * Resolve object with deep prototype chain to a flat object
+ * @param {Object} sourceObj source object
+ * @param {Object} [destObj]
+ * @param {Function|Boolean} [filter]
+ * @param {Function} [propFilter]
+ *
+ * @returns {Object}
+ */
+const toFlatObject = (sourceObj, destObj, filter, propFilter) => {
+  let props;
+  let i;
+  let prop;
+  const merged = {};
+
+  destObj = destObj || {};
+  // eslint-disable-next-line no-eq-null,eqeqeq
+  if (sourceObj == null) return destObj;
+
+  do {
+    props = Object.getOwnPropertyNames(sourceObj);
+    i = props.length;
+    while (i-- > 0) {
+      prop = props[i];
+      if ((!propFilter || propFilter(prop, sourceObj, destObj)) && !merged[prop]) {
+        destObj[prop] = sourceObj[prop];
+        merged[prop] = true;
+      }
+    }
+    sourceObj = filter !== false && getPrototypeOf(sourceObj);
+  } while (sourceObj && (!filter || filter(sourceObj, destObj)) && sourceObj !== Object.prototype);
+
+  return destObj;
+};
+
+/**
+ * Determines whether a string ends with the characters of a specified string
+ *
+ * @param {String} str
+ * @param {String} searchString
+ * @param {Number} [position= 0]
+ *
+ * @returns {boolean}
+ */
+const endsWith = (str, searchString, position) => {
+  str = String(str);
+  if (position === undefined || position > str.length) {
+    position = str.length;
+  }
+  position -= searchString.length;
+  const lastIndex = str.indexOf(searchString, position);
+  return lastIndex !== -1 && lastIndex === position;
+};
+
+
+/**
+ * Returns new array from array like object or null if failed
+ *
+ * @param {*} [thing]
+ *
+ * @returns {?Array}
+ */
+const toArray = (thing) => {
+  if (!thing) return null;
+  if (isArray(thing)) return thing;
+  let i = thing.length;
+  if (!isNumber(i)) return null;
+  const arr = new Array(i);
+  while (i-- > 0) {
+    arr[i] = thing[i];
+  }
+  return arr;
+};
+
+/**
+ * Checking if the Uint8Array exists and if it does, it returns a function that checks if the
+ * thing passed in is an instance of Uint8Array
+ *
+ * @param {TypedArray}
+ *
+ * @returns {Array}
+ */
+// eslint-disable-next-line func-names
+const isTypedArray = (TypedArray => {
+  // eslint-disable-next-line func-names
+  return thing => {
+    return TypedArray && thing instanceof TypedArray;
+  };
+})(typeof Uint8Array !== 'undefined' && getPrototypeOf(Uint8Array));
+
+/**
+ * For each entry in the object, call the function with the key and value.
+ *
+ * @param {Object<any, any>} obj - The object to iterate over.
+ * @param {Function} fn - The function to call for each entry.
+ *
+ * @returns {void}
+ */
+const forEachEntry = (obj, fn) => {
+  const generator = obj && obj[Symbol.iterator];
+
+  const iterator = generator.call(obj);
+
+  let result;
+
+  while ((result = iterator.next()) && !result.done) {
+    const pair = result.value;
+    fn.call(obj, pair[0], pair[1]);
+  }
+};
+
+/**
+ * It takes a regular expression and a string, and returns an array of all the matches
+ *
+ * @param {string} regExp - The regular expression to match against.
+ * @param {string} str - The string to search.
+ *
+ * @returns {Array<boolean>}
+ */
+const matchAll = (regExp, str) => {
+  let matches;
+  const arr = [];
+
+  while ((matches = regExp.exec(str)) !== null) {
+    arr.push(matches);
+  }
+
+  return arr;
+};
+
+/* Checking if the kindOfTest function returns true when passed an HTMLFormElement. */
+const isHTMLForm = kindOfTest('HTMLFormElement');
+
+const toCamelCase = str => {
+  return str.toLowerCase().replace(/[-_\s]([a-z\d])(\w*)/g,
+    function replacer(m, p1, p2) {
+      return p1.toUpperCase() + p2;
+    }
+  );
+};
+
+/* Creating a function that will check if an object has a property. */
+const hasOwnProperty = (({hasOwnProperty}) => (obj, prop) => hasOwnProperty.call(obj, prop))(Object.prototype);
+
+/**
+ * Determine if a value is a RegExp object
+ *
+ * @param {*} val The value to test
+ *
+ * @returns {boolean} True if value is a RegExp object, otherwise false
+ */
+const isRegExp = kindOfTest('RegExp');
+
+const reduceDescriptors = (obj, reducer) => {
+  const descriptors = Object.getOwnPropertyDescriptors(obj);
+  const reducedDescriptors = {};
+
+  forEach(descriptors, (descriptor, name) => {
+    let ret;
+    if ((ret = reducer(descriptor, name, obj)) !== false) {
+      reducedDescriptors[name] = ret || descriptor;
+    }
+  });
+
+  Object.defineProperties(obj, reducedDescriptors);
+};
+
+/**
+ * Makes all methods read-only
+ * @param {Object} obj
+ */
+
+const freezeMethods = (obj) => {
+  reduceDescriptors(obj, (descriptor, name) => {
+    // skip restricted props in strict mode
+    if (isFunction(obj) && ['arguments', 'caller', 'callee'].indexOf(name) !== -1) {
+      return false;
+    }
+
+    const value = obj[name];
+
+    if (!isFunction(value)) return;
+
+    descriptor.enumerable = false;
+
+    if ('writable' in descriptor) {
+      descriptor.writable = false;
+      return;
+    }
+
+    if (!descriptor.set) {
+      descriptor.set = () => {
+        throw Error('Can not rewrite read-only method \'' + name + '\'');
+      };
+    }
+  });
+};
+
+const toObjectSet = (arrayOrString, delimiter) => {
+  const obj = {};
+
+  const define = (arr) => {
+    arr.forEach(value => {
+      obj[value] = true;
+    });
+  };
+
+  isArray(arrayOrString) ? define(arrayOrString) : define(String(arrayOrString).split(delimiter));
+
+  return obj;
+};
+
+const noop = () => {};
+
+const toFiniteNumber = (value, defaultValue) => {
+  value = +value;
+  return Number.isFinite(value) ? value : defaultValue;
+};
+
+const ALPHA = 'abcdefghijklmnopqrstuvwxyz';
+
+const DIGIT = '0123456789';
+
+const ALPHABET = {
+  DIGIT,
+  ALPHA,
+  ALPHA_DIGIT: ALPHA + ALPHA.toUpperCase() + DIGIT
+};
+
+const generateString = (size = 16, alphabet = ALPHABET.ALPHA_DIGIT) => {
+  let str = '';
+  const {length} = alphabet;
+  while (size--) {
+    str += alphabet[Math.random() * length|0];
+  }
+
+  return str;
+};
+
+/**
+ * If the thing is a FormData object, return true, otherwise return false.
+ *
+ * @param {unknown} thing - The thing to check.
+ *
+ * @returns {boolean}
+ */
+function isSpecCompliantForm(thing) {
+  return !!(thing && isFunction(thing.append) && thing[Symbol.toStringTag] === 'FormData' && thing[Symbol.iterator]);
+}
+
+const toJSONObject = (obj) => {
+  const stack = new Array(10);
+
+  const visit = (source, i) => {
+
+    if (isObject(source)) {
+      if (stack.indexOf(source) >= 0) {
+        return;
+      }
+
+      if(!('toJSON' in source)) {
+        stack[i] = source;
+        const target = isArray(source) ? [] : {};
+
+        forEach(source, (value, key) => {
+          const reducedValue = visit(value, i + 1);
+          !isUndefined(reducedValue) && (target[key] = reducedValue);
+        });
+
+        stack[i] = undefined;
+
+        return target;
+      }
+    }
+
+    return source;
+  };
+
+  return visit(obj, 0);
+};
+
+const isAsyncFn = kindOfTest('AsyncFunction');
+
+const isThenable = (thing) =>
+  thing && (isObject(thing) || isFunction(thing)) && isFunction(thing.then) && isFunction(thing.catch);
+
+const utils$1 = {
+  isArray,
+  isArrayBuffer,
+  isBuffer,
+  isFormData,
+  isArrayBufferView,
+  isString,
+  isNumber,
+  isBoolean,
+  isObject,
+  isPlainObject,
+  isUndefined,
+  isDate,
+  isFile,
+  isBlob,
+  isRegExp,
+  isFunction,
+  isStream,
+  isURLSearchParams,
+  isTypedArray,
+  isFileList,
+  forEach,
+  merge,
+  extend,
+  trim,
+  stripBOM,
+  inherits,
+  toFlatObject,
+  kindOf,
+  kindOfTest,
+  endsWith,
+  toArray,
+  forEachEntry,
+  matchAll,
+  isHTMLForm,
+  hasOwnProperty,
+  hasOwnProp: hasOwnProperty, // an alias to avoid ESLint no-prototype-builtins detection
+  reduceDescriptors,
+  freezeMethods,
+  toObjectSet,
+  toCamelCase,
+  noop,
+  toFiniteNumber,
+  findKey,
+  global: _global,
+  isContextDefined,
+  ALPHABET,
+  generateString,
+  isSpecCompliantForm,
+  toJSONObject,
+  isAsyncFn,
+  isThenable
+};
+
+/**
+ * Create an Error with the specified message, config, error code, request and response.
+ *
+ * @param {string} message The error message.
+ * @param {string} [code] The error code (for example, 'ECONNABORTED').
+ * @param {Object} [config] The config.
+ * @param {Object} [request] The request.
+ * @param {Object} [response] The response.
+ *
+ * @returns {Error} The created error.
+ */
+function AxiosError(message, code, config, request, response) {
+  Error.call(this);
+
+  if (Error.captureStackTrace) {
+    Error.captureStackTrace(this, this.constructor);
+  } else {
+    this.stack = (new Error()).stack;
+  }
+
+  this.message = message;
+  this.name = 'AxiosError';
+  code && (this.code = code);
+  config && (this.config = config);
+  request && (this.request = request);
+  response && (this.response = response);
+}
+
+utils$1.inherits(AxiosError, Error, {
+  toJSON: function toJSON() {
+    return {
+      // Standard
+      message: this.message,
+      name: this.name,
+      // Microsoft
+      description: this.description,
+      number: this.number,
+      // Mozilla
+      fileName: this.fileName,
+      lineNumber: this.lineNumber,
+      columnNumber: this.columnNumber,
+      stack: this.stack,
+      // Axios
+      config: utils$1.toJSONObject(this.config),
+      code: this.code,
+      status: this.response && this.response.status ? this.response.status : null
+    };
+  }
+});
+
+const prototype$1 = AxiosError.prototype;
+const descriptors = {};
+
+[
+  'ERR_BAD_OPTION_VALUE',
+  'ERR_BAD_OPTION',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'ERR_NETWORK',
+  'ERR_FR_TOO_MANY_REDIRECTS',
+  'ERR_DEPRECATED',
+  'ERR_BAD_RESPONSE',
+  'ERR_BAD_REQUEST',
+  'ERR_CANCELED',
+  'ERR_NOT_SUPPORT',
+  'ERR_INVALID_URL'
+// eslint-disable-next-line func-names
+].forEach(code => {
+  descriptors[code] = {value: code};
+});
+
+Object.defineProperties(AxiosError, descriptors);
+Object.defineProperty(prototype$1, 'isAxiosError', {value: true});
+
+// eslint-disable-next-line func-names
+AxiosError.from = (error, code, config, request, response, customProps) => {
+  const axiosError = Object.create(prototype$1);
+
+  utils$1.toFlatObject(error, axiosError, function filter(obj) {
+    return obj !== Error.prototype;
+  }, prop => {
+    return prop !== 'isAxiosError';
+  });
+
+  AxiosError.call(axiosError, error.message, code, config, request, response);
+
+  axiosError.cause = error;
+
+  axiosError.name = error.name;
+
+  customProps && Object.assign(axiosError, customProps);
+
+  return axiosError;
+};
+
+/**
+ * Determines if the given thing is a array or js object.
+ *
+ * @param {string} thing - The object or array to be visited.
+ *
+ * @returns {boolean}
+ */
+function isVisitable(thing) {
+  return utils$1.isPlainObject(thing) || utils$1.isArray(thing);
+}
+
+/**
+ * It removes the brackets from the end of a string
+ *
+ * @param {string} key - The key of the parameter.
+ *
+ * @returns {string} the key without the brackets.
+ */
+function removeBrackets(key) {
+  return utils$1.endsWith(key, '[]') ? key.slice(0, -2) : key;
+}
+
+/**
+ * It takes a path, a key, and a boolean, and returns a string
+ *
+ * @param {string} path - The path to the current key.
+ * @param {string} key - The key of the current object being iterated over.
+ * @param {string} dots - If true, the key will be rendered with dots instead of brackets.
+ *
+ * @returns {string} The path to the current key.
+ */
+function renderKey(path, key, dots) {
+  if (!path) return key;
+  return path.concat(key).map(function each(token, i) {
+    // eslint-disable-next-line no-param-reassign
+    token = removeBrackets(token);
+    return !dots && i ? '[' + token + ']' : token;
+  }).join(dots ? '.' : '');
+}
+
+/**
+ * If the array is an array and none of its elements are visitable, then it's a flat array.
+ *
+ * @param {Array<any>} arr - The array to check
+ *
+ * @returns {boolean}
+ */
+function isFlatArray(arr) {
+  return utils$1.isArray(arr) && !arr.some(isVisitable);
+}
+
+const predicates = utils$1.toFlatObject(utils$1, {}, null, function filter(prop) {
+  return /^is[A-Z]/.test(prop);
+});
+
+/**
+ * Convert a data object to FormData
+ *
+ * @param {Object} obj
+ * @param {?Object} [formData]
+ * @param {?Object} [options]
+ * @param {Function} [options.visitor]
+ * @param {Boolean} [options.metaTokens = true]
+ * @param {Boolean} [options.dots = false]
+ * @param {?Boolean} [options.indexes = false]
+ *
+ * @returns {Object}
+ **/
+
+/**
+ * It converts an object into a FormData object
+ *
+ * @param {Object<any, any>} obj - The object to convert to form data.
+ * @param {string} formData - The FormData object to append to.
+ * @param {Object<string, any>} options
+ *
+ * @returns
+ */
+function toFormData(obj, formData, options) {
+  if (!utils$1.isObject(obj)) {
+    throw new TypeError('target must be an object');
+  }
+
+  // eslint-disable-next-line no-param-reassign
+  formData = formData || new (FormData__default["default"] || FormData)();
+
+  // eslint-disable-next-line no-param-reassign
+  options = utils$1.toFlatObject(options, {
+    metaTokens: true,
+    dots: false,
+    indexes: false
+  }, false, function defined(option, source) {
+    // eslint-disable-next-line no-eq-null,eqeqeq
+    return !utils$1.isUndefined(source[option]);
+  });
+
+  const metaTokens = options.metaTokens;
+  // eslint-disable-next-line no-use-before-define
+  const visitor = options.visitor || defaultVisitor;
+  const dots = options.dots;
+  const indexes = options.indexes;
+  const _Blob = options.Blob || typeof Blob !== 'undefined' && Blob;
+  const useBlob = _Blob && utils$1.isSpecCompliantForm(formData);
+
+  if (!utils$1.isFunction(visitor)) {
+    throw new TypeError('visitor must be a function');
+  }
+
+  function convertValue(value) {
+    if (value === null) return '';
+
+    if (utils$1.isDate(value)) {
+      return value.toISOString();
+    }
+
+    if (!useBlob && utils$1.isBlob(value)) {
+      throw new AxiosError('Blob is not supported. Use a Buffer instead.');
+    }
+
+    if (utils$1.isArrayBuffer(value) || utils$1.isTypedArray(value)) {
+      return useBlob && typeof Blob === 'function' ? new Blob([value]) : Buffer.from(value);
+    }
+
+    return value;
+  }
+
+  /**
+   * Default visitor.
+   *
+   * @param {*} value
+   * @param {String|Number} key
+   * @param {Array<String|Number>} path
+   * @this {FormData}
+   *
+   * @returns {boolean} return true to visit the each prop of the value recursively
+   */
+  function defaultVisitor(value, key, path) {
+    let arr = value;
+
+    if (value && !path && typeof value === 'object') {
+      if (utils$1.endsWith(key, '{}')) {
+        // eslint-disable-next-line no-param-reassign
+        key = metaTokens ? key : key.slice(0, -2);
+        // eslint-disable-next-line no-param-reassign
+        value = JSON.stringify(value);
+      } else if (
+        (utils$1.isArray(value) && isFlatArray(value)) ||
+        ((utils$1.isFileList(value) || utils$1.endsWith(key, '[]')) && (arr = utils$1.toArray(value))
+        )) {
+        // eslint-disable-next-line no-param-reassign
+        key = removeBrackets(key);
+
+        arr.forEach(function each(el, index) {
+          !(utils$1.isUndefined(el) || el === null) && formData.append(
+            // eslint-disable-next-line no-nested-ternary
+            indexes === true ? renderKey([key], index, dots) : (indexes === null ? key : key + '[]'),
+            convertValue(el)
+          );
+        });
+        return false;
+      }
+    }
+
+    if (isVisitable(value)) {
+      return true;
+    }
+
+    formData.append(renderKey(path, key, dots), convertValue(value));
+
+    return false;
+  }
+
+  const stack = [];
+
+  const exposedHelpers = Object.assign(predicates, {
+    defaultVisitor,
+    convertValue,
+    isVisitable
+  });
+
+  function build(value, path) {
+    if (utils$1.isUndefined(value)) return;
+
+    if (stack.indexOf(value) !== -1) {
+      throw Error('Circular reference detected in ' + path.join('.'));
+    }
+
+    stack.push(value);
+
+    utils$1.forEach(value, function each(el, key) {
+      const result = !(utils$1.isUndefined(el) || el === null) && visitor.call(
+        formData, el, utils$1.isString(key) ? key.trim() : key, path, exposedHelpers
+      );
+
+      if (result === true) {
+        build(el, path ? path.concat(key) : [key]);
+      }
+    });
+
+    stack.pop();
+  }
+
+  if (!utils$1.isObject(obj)) {
+    throw new TypeError('data must be an object');
+  }
+
+  build(obj);
+
+  return formData;
+}
+
+/**
+ * It encodes a string by replacing all characters that are not in the unreserved set with
+ * their percent-encoded equivalents
+ *
+ * @param {string} str - The string to encode.
+ *
+ * @returns {string} The encoded string.
+ */
+function encode$1(str) {
+  const charMap = {
+    '!': '%21',
+    "'": '%27',
+    '(': '%28',
+    ')': '%29',
+    '~': '%7E',
+    '%20': '+',
+    '%00': '\x00'
+  };
+  return encodeURIComponent(str).replace(/[!'()~]|%20|%00/g, function replacer(match) {
+    return charMap[match];
+  });
+}
+
+/**
+ * It takes a params object and converts it to a FormData object
+ *
+ * @param {Object<string, any>} params - The parameters to be converted to a FormData object.
+ * @param {Object<string, any>} options - The options object passed to the Axios constructor.
+ *
+ * @returns {void}
+ */
+function AxiosURLSearchParams(params, options) {
+  this._pairs = [];
+
+  params && toFormData(params, this, options);
+}
+
+const prototype = AxiosURLSearchParams.prototype;
+
+prototype.append = function append(name, value) {
+  this._pairs.push([name, value]);
+};
+
+prototype.toString = function toString(encoder) {
+  const _encode = encoder ? function(value) {
+    return encoder.call(this, value, encode$1);
+  } : encode$1;
+
+  return this._pairs.map(function each(pair) {
+    return _encode(pair[0]) + '=' + _encode(pair[1]);
+  }, '').join('&');
+};
+
+/**
+ * It replaces all instances of the characters `:`, `$`, `,`, `+`, `[`, and `]` with their
+ * URI encoded counterparts
+ *
+ * @param {string} val The value to be encoded.
+ *
+ * @returns {string} The encoded value.
+ */
+function encode(val) {
+  return encodeURIComponent(val).
+    replace(/%3A/gi, ':').
+    replace(/%24/g, '$').
+    replace(/%2C/gi, ',').
+    replace(/%20/g, '+').
+    replace(/%5B/gi, '[').
+    replace(/%5D/gi, ']');
+}
+
+/**
+ * Build a URL by appending params to the end
+ *
+ * @param {string} url The base of the url (e.g., http://www.google.com)
+ * @param {object} [params] The params to be appended
+ * @param {?object} options
+ *
+ * @returns {string} The formatted url
+ */
+function buildURL(url, params, options) {
+  /*eslint no-param-reassign:0*/
+  if (!params) {
+    return url;
+  }
+  
+  const _encode = options && options.encode || encode;
+
+  const serializeFn = options && options.serialize;
+
+  let serializedParams;
+
+  if (serializeFn) {
+    serializedParams = serializeFn(params, options);
+  } else {
+    serializedParams = utils$1.isURLSearchParams(params) ?
+      params.toString() :
+      new AxiosURLSearchParams(params, options).toString(_encode);
+  }
+
+  if (serializedParams) {
+    const hashmarkIndex = url.indexOf("#");
+
+    if (hashmarkIndex !== -1) {
+      url = url.slice(0, hashmarkIndex);
+    }
+    url += (url.indexOf('?') === -1 ? '?' : '&') + serializedParams;
+  }
+
+  return url;
+}
+
+class InterceptorManager {
+  constructor() {
+    this.handlers = [];
+  }
+
+  /**
+   * Add a new interceptor to the stack
+   *
+   * @param {Function} fulfilled The function to handle `then` for a `Promise`
+   * @param {Function} rejected The function to handle `reject` for a `Promise`
+   *
+   * @return {Number} An ID used to remove interceptor later
+   */
+  use(fulfilled, rejected, options) {
+    this.handlers.push({
+      fulfilled,
+      rejected,
+      synchronous: options ? options.synchronous : false,
+      runWhen: options ? options.runWhen : null
+    });
+    return this.handlers.length - 1;
+  }
+
+  /**
+   * Remove an interceptor from the stack
+   *
+   * @param {Number} id The ID that was returned by `use`
+   *
+   * @returns {Boolean} `true` if the interceptor was removed, `false` otherwise
+   */
+  eject(id) {
+    if (this.handlers[id]) {
+      this.handlers[id] = null;
+    }
+  }
+
+  /**
+   * Clear all interceptors from the stack
+   *
+   * @returns {void}
+   */
+  clear() {
+    if (this.handlers) {
+      this.handlers = [];
+    }
+  }
+
+  /**
+   * Iterate over all the registered interceptors
+   *
+   * This method is particularly useful for skipping over any
+   * interceptors that may have become `null` calling `eject`.
+   *
+   * @param {Function} fn The function to call for each interceptor
+   *
+   * @returns {void}
+   */
+  forEach(fn) {
+    utils$1.forEach(this.handlers, function forEachHandler(h) {
+      if (h !== null) {
+        fn(h);
+      }
+    });
+  }
+}
+
+const InterceptorManager$1 = InterceptorManager;
+
+const transitionalDefaults = {
+  silentJSONParsing: true,
+  forcedJSONParsing: true,
+  clarifyTimeoutError: false
+};
+
+const URLSearchParams = url__default["default"].URLSearchParams;
+
+const platform$1 = {
+  isNode: true,
+  classes: {
+    URLSearchParams,
+    FormData: FormData__default["default"],
+    Blob: typeof Blob !== 'undefined' && Blob || null
+  },
+  protocols: [ 'http', 'https', 'file', 'data' ]
+};
+
+const hasBrowserEnv = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+/**
+ * Determine if we're running in a standard browser environment
+ *
+ * This allows axios to run in a web worker, and react-native.
+ * Both environments support XMLHttpRequest, but not fully standard globals.
+ *
+ * web workers:
+ *  typeof window -> undefined
+ *  typeof document -> undefined
+ *
+ * react-native:
+ *  navigator.product -> 'ReactNative'
+ * nativescript
+ *  navigator.product -> 'NativeScript' or 'NS'
+ *
+ * @returns {boolean}
+ */
+const hasStandardBrowserEnv = (
+  (product) => {
+    return hasBrowserEnv && ['ReactNative', 'NativeScript', 'NS'].indexOf(product) < 0
+  })(typeof navigator !== 'undefined' && navigator.product);
+
+/**
+ * Determine if we're running in a standard browser webWorker environment
+ *
+ * Although the `isStandardBrowserEnv` method indicates that
+ * `allows axios to run in a web worker`, the WebWorker will still be
+ * filtered out due to its judgment standard
+ * `typeof window !== 'undefined' && typeof document !== 'undefined'`.
+ * This leads to a problem when axios post `FormData` in webWorker
+ */
+const hasStandardBrowserWebWorkerEnv = (() => {
+  return (
+    typeof WorkerGlobalScope !== 'undefined' &&
+    // eslint-disable-next-line no-undef
+    self instanceof WorkerGlobalScope &&
+    typeof self.importScripts === 'function'
+  );
+})();
+
+const utils = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  hasBrowserEnv: hasBrowserEnv,
+  hasStandardBrowserWebWorkerEnv: hasStandardBrowserWebWorkerEnv,
+  hasStandardBrowserEnv: hasStandardBrowserEnv
+});
+
+const platform = {
+  ...utils,
+  ...platform$1
+};
+
+function toURLEncodedForm(data, options) {
+  return toFormData(data, new platform.classes.URLSearchParams(), Object.assign({
+    visitor: function(value, key, path, helpers) {
+      if (platform.isNode && utils$1.isBuffer(value)) {
+        this.append(key, value.toString('base64'));
+        return false;
+      }
+
+      return helpers.defaultVisitor.apply(this, arguments);
+    }
+  }, options));
+}
+
+/**
+ * It takes a string like `foo[x][y][z]` and returns an array like `['foo', 'x', 'y', 'z']
+ *
+ * @param {string} name - The name of the property to get.
+ *
+ * @returns An array of strings.
+ */
+function parsePropPath(name) {
+  // foo[x][y][z]
+  // foo.x.y.z
+  // foo-x-y-z
+  // foo x y z
+  return utils$1.matchAll(/\w+|\[(\w*)]/g, name).map(match => {
+    return match[0] === '[]' ? '' : match[1] || match[0];
+  });
+}
+
+/**
+ * Convert an array to an object.
+ *
+ * @param {Array<any>} arr - The array to convert to an object.
+ *
+ * @returns An object with the same keys and values as the array.
+ */
+function arrayToObject(arr) {
+  const obj = {};
+  const keys = Object.keys(arr);
+  let i;
+  const len = keys.length;
+  let key;
+  for (i = 0; i < len; i++) {
+    key = keys[i];
+    obj[key] = arr[key];
+  }
+  return obj;
+}
+
+/**
+ * It takes a FormData object and returns a JavaScript object
+ *
+ * @param {string} formData The FormData object to convert to JSON.
+ *
+ * @returns {Object<string, any> | null} The converted object.
+ */
+function formDataToJSON(formData) {
+  function buildPath(path, value, target, index) {
+    let name = path[index++];
+    const isNumericKey = Number.isFinite(+name);
+    const isLast = index >= path.length;
+    name = !name && utils$1.isArray(target) ? target.length : name;
+
+    if (isLast) {
+      if (utils$1.hasOwnProp(target, name)) {
+        target[name] = [target[name], value];
+      } else {
+        target[name] = value;
+      }
+
+      return !isNumericKey;
+    }
+
+    if (!target[name] || !utils$1.isObject(target[name])) {
+      target[name] = [];
+    }
+
+    const result = buildPath(path, value, target[name], index);
+
+    if (result && utils$1.isArray(target[name])) {
+      target[name] = arrayToObject(target[name]);
+    }
+
+    return !isNumericKey;
+  }
+
+  if (utils$1.isFormData(formData) && utils$1.isFunction(formData.entries)) {
+    const obj = {};
+
+    utils$1.forEachEntry(formData, (name, value) => {
+      buildPath(parsePropPath(name), value, obj, 0);
+    });
+
+    return obj;
+  }
+
+  return null;
+}
+
+/**
+ * It takes a string, tries to parse it, and if it fails, it returns the stringified version
+ * of the input
+ *
+ * @param {any} rawValue - The value to be stringified.
+ * @param {Function} parser - A function that parses a string into a JavaScript object.
+ * @param {Function} encoder - A function that takes a value and returns a string.
+ *
+ * @returns {string} A stringified version of the rawValue.
+ */
+function stringifySafely(rawValue, parser, encoder) {
+  if (utils$1.isString(rawValue)) {
+    try {
+      (parser || JSON.parse)(rawValue);
+      return utils$1.trim(rawValue);
+    } catch (e) {
+      if (e.name !== 'SyntaxError') {
+        throw e;
+      }
+    }
+  }
+
+  return (encoder || JSON.stringify)(rawValue);
+}
+
+const defaults = {
+
+  transitional: transitionalDefaults,
+
+  adapter: ['xhr', 'http'],
+
+  transformRequest: [function transformRequest(data, headers) {
+    const contentType = headers.getContentType() || '';
+    const hasJSONContentType = contentType.indexOf('application/json') > -1;
+    const isObjectPayload = utils$1.isObject(data);
+
+    if (isObjectPayload && utils$1.isHTMLForm(data)) {
+      data = new FormData(data);
+    }
+
+    const isFormData = utils$1.isFormData(data);
+
+    if (isFormData) {
+      if (!hasJSONContentType) {
+        return data;
+      }
+      return hasJSONContentType ? JSON.stringify(formDataToJSON(data)) : data;
+    }
+
+    if (utils$1.isArrayBuffer(data) ||
+      utils$1.isBuffer(data) ||
+      utils$1.isStream(data) ||
+      utils$1.isFile(data) ||
+      utils$1.isBlob(data)
+    ) {
+      return data;
+    }
+    if (utils$1.isArrayBufferView(data)) {
+      return data.buffer;
+    }
+    if (utils$1.isURLSearchParams(data)) {
+      headers.setContentType('application/x-www-form-urlencoded;charset=utf-8', false);
+      return data.toString();
+    }
+
+    let isFileList;
+
+    if (isObjectPayload) {
+      if (contentType.indexOf('application/x-www-form-urlencoded') > -1) {
+        return toURLEncodedForm(data, this.formSerializer).toString();
+      }
+
+      if ((isFileList = utils$1.isFileList(data)) || contentType.indexOf('multipart/form-data') > -1) {
+        const _FormData = this.env && this.env.FormData;
+
+        return toFormData(
+          isFileList ? {'files[]': data} : data,
+          _FormData && new _FormData(),
+          this.formSerializer
+        );
+      }
+    }
+
+    if (isObjectPayload || hasJSONContentType ) {
+      headers.setContentType('application/json', false);
+      return stringifySafely(data);
+    }
+
+    return data;
+  }],
+
+  transformResponse: [function transformResponse(data) {
+    const transitional = this.transitional || defaults.transitional;
+    const forcedJSONParsing = transitional && transitional.forcedJSONParsing;
+    const JSONRequested = this.responseType === 'json';
+
+    if (data && utils$1.isString(data) && ((forcedJSONParsing && !this.responseType) || JSONRequested)) {
+      const silentJSONParsing = transitional && transitional.silentJSONParsing;
+      const strictJSONParsing = !silentJSONParsing && JSONRequested;
+
+      try {
+        return JSON.parse(data);
+      } catch (e) {
+        if (strictJSONParsing) {
+          if (e.name === 'SyntaxError') {
+            throw AxiosError.from(e, AxiosError.ERR_BAD_RESPONSE, this, null, this.response);
+          }
+          throw e;
+        }
+      }
+    }
+
+    return data;
+  }],
+
+  /**
+   * A timeout in milliseconds to abort a request. If set to 0 (default) a
+   * timeout is not created.
+   */
+  timeout: 0,
+
+  xsrfCookieName: 'XSRF-TOKEN',
+  xsrfHeaderName: 'X-XSRF-TOKEN',
+
+  maxContentLength: -1,
+  maxBodyLength: -1,
+
+  env: {
+    FormData: platform.classes.FormData,
+    Blob: platform.classes.Blob
+  },
+
+  validateStatus: function validateStatus(status) {
+    return status >= 200 && status < 300;
+  },
+
+  headers: {
+    common: {
+      'Accept': 'application/json, text/plain, */*',
+      'Content-Type': undefined
+    }
+  }
+};
+
+utils$1.forEach(['delete', 'get', 'head', 'post', 'put', 'patch'], (method) => {
+  defaults.headers[method] = {};
+});
+
+const defaults$1 = defaults;
+
+// RawAxiosHeaders whose duplicates are ignored by node
+// c.f. https://nodejs.org/api/http.html#http_message_headers
+const ignoreDuplicateOf = utils$1.toObjectSet([
+  'age', 'authorization', 'content-length', 'content-type', 'etag',
+  'expires', 'from', 'host', 'if-modified-since', 'if-unmodified-since',
+  'last-modified', 'location', 'max-forwards', 'proxy-authorization',
+  'referer', 'retry-after', 'user-agent'
+]);
+
+/**
+ * Parse headers into an object
+ *
+ * ```
+ * Date: Wed, 27 Aug 2014 08:58:49 GMT
+ * Content-Type: application/json
+ * Connection: keep-alive
+ * Transfer-Encoding: chunked
+ * ```
+ *
+ * @param {String} rawHeaders Headers needing to be parsed
+ *
+ * @returns {Object} Headers parsed into an object
+ */
+const parseHeaders = rawHeaders => {
+  const parsed = {};
+  let key;
+  let val;
+  let i;
+
+  rawHeaders && rawHeaders.split('\n').forEach(function parser(line) {
+    i = line.indexOf(':');
+    key = line.substring(0, i).trim().toLowerCase();
+    val = line.substring(i + 1).trim();
+
+    if (!key || (parsed[key] && ignoreDuplicateOf[key])) {
+      return;
+    }
+
+    if (key === 'set-cookie') {
+      if (parsed[key]) {
+        parsed[key].push(val);
+      } else {
+        parsed[key] = [val];
+      }
+    } else {
+      parsed[key] = parsed[key] ? parsed[key] + ', ' + val : val;
+    }
+  });
+
+  return parsed;
+};
+
+const $internals = Symbol('internals');
+
+function normalizeHeader(header) {
+  return header && String(header).trim().toLowerCase();
+}
+
+function normalizeValue(value) {
+  if (value === false || value == null) {
+    return value;
+  }
+
+  return utils$1.isArray(value) ? value.map(normalizeValue) : String(value);
+}
+
+function parseTokens(str) {
+  const tokens = Object.create(null);
+  const tokensRE = /([^\s,;=]+)\s*(?:=\s*([^,;]+))?/g;
+  let match;
+
+  while ((match = tokensRE.exec(str))) {
+    tokens[match[1]] = match[2];
+  }
+
+  return tokens;
+}
+
+const isValidHeaderName = (str) => /^[-_a-zA-Z0-9^`|~,!#$%&'*+.]+$/.test(str.trim());
+
+function matchHeaderValue(context, value, header, filter, isHeaderNameFilter) {
+  if (utils$1.isFunction(filter)) {
+    return filter.call(this, value, header);
+  }
+
+  if (isHeaderNameFilter) {
+    value = header;
+  }
+
+  if (!utils$1.isString(value)) return;
+
+  if (utils$1.isString(filter)) {
+    return value.indexOf(filter) !== -1;
+  }
+
+  if (utils$1.isRegExp(filter)) {
+    return filter.test(value);
+  }
+}
+
+function formatHeader(header) {
+  return header.trim()
+    .toLowerCase().replace(/([a-z\d])(\w*)/g, (w, char, str) => {
+      return char.toUpperCase() + str;
+    });
+}
+
+function buildAccessors(obj, header) {
+  const accessorName = utils$1.toCamelCase(' ' + header);
+
+  ['get', 'set', 'has'].forEach(methodName => {
+    Object.defineProperty(obj, methodName + accessorName, {
+      value: function(arg1, arg2, arg3) {
+        return this[methodName].call(this, header, arg1, arg2, arg3);
+      },
+      configurable: true
+    });
+  });
+}
+
+class AxiosHeaders {
+  constructor(headers) {
+    headers && this.set(headers);
+  }
+
+  set(header, valueOrRewrite, rewrite) {
+    const self = this;
+
+    function setHeader(_value, _header, _rewrite) {
+      const lHeader = normalizeHeader(_header);
+
+      if (!lHeader) {
+        throw new Error('header name must be a non-empty string');
+      }
+
+      const key = utils$1.findKey(self, lHeader);
+
+      if(!key || self[key] === undefined || _rewrite === true || (_rewrite === undefined && self[key] !== false)) {
+        self[key || _header] = normalizeValue(_value);
+      }
+    }
+
+    const setHeaders = (headers, _rewrite) =>
+      utils$1.forEach(headers, (_value, _header) => setHeader(_value, _header, _rewrite));
+
+    if (utils$1.isPlainObject(header) || header instanceof this.constructor) {
+      setHeaders(header, valueOrRewrite);
+    } else if(utils$1.isString(header) && (header = header.trim()) && !isValidHeaderName(header)) {
+      setHeaders(parseHeaders(header), valueOrRewrite);
+    } else {
+      header != null && setHeader(valueOrRewrite, header, rewrite);
+    }
+
+    return this;
+  }
+
+  get(header, parser) {
+    header = normalizeHeader(header);
+
+    if (header) {
+      const key = utils$1.findKey(this, header);
+
+      if (key) {
+        const value = this[key];
+
+        if (!parser) {
+          return value;
+        }
+
+        if (parser === true) {
+          return parseTokens(value);
+        }
+
+        if (utils$1.isFunction(parser)) {
+          return parser.call(this, value, key);
+        }
+
+        if (utils$1.isRegExp(parser)) {
+          return parser.exec(value);
+        }
+
+        throw new TypeError('parser must be boolean|regexp|function');
+      }
+    }
+  }
+
+  has(header, matcher) {
+    header = normalizeHeader(header);
+
+    if (header) {
+      const key = utils$1.findKey(this, header);
+
+      return !!(key && this[key] !== undefined && (!matcher || matchHeaderValue(this, this[key], key, matcher)));
+    }
+
+    return false;
+  }
+
+  delete(header, matcher) {
+    const self = this;
+    let deleted = false;
+
+    function deleteHeader(_header) {
+      _header = normalizeHeader(_header);
+
+      if (_header) {
+        const key = utils$1.findKey(self, _header);
+
+        if (key && (!matcher || matchHeaderValue(self, self[key], key, matcher))) {
+          delete self[key];
+
+          deleted = true;
+        }
+      }
+    }
+
+    if (utils$1.isArray(header)) {
+      header.forEach(deleteHeader);
+    } else {
+      deleteHeader(header);
+    }
+
+    return deleted;
+  }
+
+  clear(matcher) {
+    const keys = Object.keys(this);
+    let i = keys.length;
+    let deleted = false;
+
+    while (i--) {
+      const key = keys[i];
+      if(!matcher || matchHeaderValue(this, this[key], key, matcher, true)) {
+        delete this[key];
+        deleted = true;
+      }
+    }
+
+    return deleted;
+  }
+
+  normalize(format) {
+    const self = this;
+    const headers = {};
+
+    utils$1.forEach(this, (value, header) => {
+      const key = utils$1.findKey(headers, header);
+
+      if (key) {
+        self[key] = normalizeValue(value);
+        delete self[header];
+        return;
+      }
+
+      const normalized = format ? formatHeader(header) : String(header).trim();
+
+      if (normalized !== header) {
+        delete self[header];
+      }
+
+      self[normalized] = normalizeValue(value);
+
+      headers[normalized] = true;
+    });
+
+    return this;
+  }
+
+  concat(...targets) {
+    return this.constructor.concat(this, ...targets);
+  }
+
+  toJSON(asStrings) {
+    const obj = Object.create(null);
+
+    utils$1.forEach(this, (value, header) => {
+      value != null && value !== false && (obj[header] = asStrings && utils$1.isArray(value) ? value.join(', ') : value);
+    });
+
+    return obj;
+  }
+
+  [Symbol.iterator]() {
+    return Object.entries(this.toJSON())[Symbol.iterator]();
+  }
+
+  toString() {
+    return Object.entries(this.toJSON()).map(([header, value]) => header + ': ' + value).join('\n');
+  }
+
+  get [Symbol.toStringTag]() {
+    return 'AxiosHeaders';
+  }
+
+  static from(thing) {
+    return thing instanceof this ? thing : new this(thing);
+  }
+
+  static concat(first, ...targets) {
+    const computed = new this(first);
+
+    targets.forEach((target) => computed.set(target));
+
+    return computed;
+  }
+
+  static accessor(header) {
+    const internals = this[$internals] = (this[$internals] = {
+      accessors: {}
+    });
+
+    const accessors = internals.accessors;
+    const prototype = this.prototype;
+
+    function defineAccessor(_header) {
+      const lHeader = normalizeHeader(_header);
+
+      if (!accessors[lHeader]) {
+        buildAccessors(prototype, _header);
+        accessors[lHeader] = true;
+      }
+    }
+
+    utils$1.isArray(header) ? header.forEach(defineAccessor) : defineAccessor(header);
+
+    return this;
+  }
+}
+
+AxiosHeaders.accessor(['Content-Type', 'Content-Length', 'Accept', 'Accept-Encoding', 'User-Agent', 'Authorization']);
+
+// reserved names hotfix
+utils$1.reduceDescriptors(AxiosHeaders.prototype, ({value}, key) => {
+  let mapped = key[0].toUpperCase() + key.slice(1); // map `set` => `Set`
+  return {
+    get: () => value,
+    set(headerValue) {
+      this[mapped] = headerValue;
+    }
+  }
+});
+
+utils$1.freezeMethods(AxiosHeaders);
+
+const AxiosHeaders$1 = AxiosHeaders;
+
+/**
+ * Transform the data for a request or a response
+ *
+ * @param {Array|Function} fns A single function or Array of functions
+ * @param {?Object} response The response object
+ *
+ * @returns {*} The resulting transformed data
+ */
+function transformData(fns, response) {
+  const config = this || defaults$1;
+  const context = response || config;
+  const headers = AxiosHeaders$1.from(context.headers);
+  let data = context.data;
+
+  utils$1.forEach(fns, function transform(fn) {
+    data = fn.call(config, data, headers.normalize(), response ? response.status : undefined);
+  });
+
+  headers.normalize();
+
+  return data;
+}
+
+function isCancel(value) {
+  return !!(value && value.__CANCEL__);
+}
+
+/**
+ * A `CanceledError` is an object that is thrown when an operation is canceled.
+ *
+ * @param {string=} message The message.
+ * @param {Object=} config The config.
+ * @param {Object=} request The request.
+ *
+ * @returns {CanceledError} The created error.
+ */
+function CanceledError(message, config, request) {
+  // eslint-disable-next-line no-eq-null,eqeqeq
+  AxiosError.call(this, message == null ? 'canceled' : message, AxiosError.ERR_CANCELED, config, request);
+  this.name = 'CanceledError';
+}
+
+utils$1.inherits(CanceledError, AxiosError, {
+  __CANCEL__: true
+});
+
+/**
+ * Resolve or reject a Promise based on response status.
+ *
+ * @param {Function} resolve A function that resolves the promise.
+ * @param {Function} reject A function that rejects the promise.
+ * @param {object} response The response.
+ *
+ * @returns {object} The response.
+ */
+function settle(resolve, reject, response) {
+  const validateStatus = response.config.validateStatus;
+  if (!response.status || !validateStatus || validateStatus(response.status)) {
+    resolve(response);
+  } else {
+    reject(new AxiosError(
+      'Request failed with status code ' + response.status,
+      [AxiosError.ERR_BAD_REQUEST, AxiosError.ERR_BAD_RESPONSE][Math.floor(response.status / 100) - 4],
+      response.config,
+      response.request,
+      response
+    ));
+  }
+}
+
+/**
+ * Determines whether the specified URL is absolute
+ *
+ * @param {string} url The URL to test
+ *
+ * @returns {boolean} True if the specified URL is absolute, otherwise false
+ */
+function isAbsoluteURL(url) {
+  // A URL is considered absolute if it begins with "<scheme>://" or "//" (protocol-relative URL).
+  // RFC 3986 defines scheme name as a sequence of characters beginning with a letter and followed
+  // by any combination of letters, digits, plus, period, or hyphen.
+  return /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url);
+}
+
+/**
+ * Creates a new URL by combining the specified URLs
+ *
+ * @param {string} baseURL The base URL
+ * @param {string} relativeURL The relative URL
+ *
+ * @returns {string} The combined URL
+ */
+function combineURLs(baseURL, relativeURL) {
+  return relativeURL
+    ? baseURL.replace(/\/+$/, '') + '/' + relativeURL.replace(/^\/+/, '')
+    : baseURL;
+}
+
+/**
+ * Creates a new URL by combining the baseURL with the requestedURL,
+ * only when the requestedURL is not already an absolute URL.
+ * If the requestURL is absolute, this function returns the requestedURL untouched.
+ *
+ * @param {string} baseURL The base URL
+ * @param {string} requestedURL Absolute or relative URL to combine
+ *
+ * @returns {string} The combined full path
+ */
+function buildFullPath(baseURL, requestedURL) {
+  if (baseURL && !isAbsoluteURL(requestedURL)) {
+    return combineURLs(baseURL, requestedURL);
+  }
+  return requestedURL;
+}
+
+const VERSION = "1.6.2";
+
+function parseProtocol(url) {
+  const match = /^([-+\w]{1,25})(:?\/\/|:)/.exec(url);
+  return match && match[1] || '';
+}
+
+const DATA_URL_PATTERN = /^(?:([^;]+);)?(?:[^;]+;)?(base64|),([\s\S]*)$/;
+
+/**
+ * Parse data uri to a Buffer or Blob
+ *
+ * @param {String} uri
+ * @param {?Boolean} asBlob
+ * @param {?Object} options
+ * @param {?Function} options.Blob
+ *
+ * @returns {Buffer|Blob}
+ */
+function fromDataURI(uri, asBlob, options) {
+  const _Blob = options && options.Blob || platform.classes.Blob;
+  const protocol = parseProtocol(uri);
+
+  if (asBlob === undefined && _Blob) {
+    asBlob = true;
+  }
+
+  if (protocol === 'data') {
+    uri = protocol.length ? uri.slice(protocol.length + 1) : uri;
+
+    const match = DATA_URL_PATTERN.exec(uri);
+
+    if (!match) {
+      throw new AxiosError('Invalid URL', AxiosError.ERR_INVALID_URL);
+    }
+
+    const mime = match[1];
+    const isBase64 = match[2];
+    const body = match[3];
+    const buffer = Buffer.from(decodeURIComponent(body), isBase64 ? 'base64' : 'utf8');
+
+    if (asBlob) {
+      if (!_Blob) {
+        throw new AxiosError('Blob is not supported', AxiosError.ERR_NOT_SUPPORT);
+      }
+
+      return new _Blob([buffer], {type: mime});
+    }
+
+    return buffer;
+  }
+
+  throw new AxiosError('Unsupported protocol ' + protocol, AxiosError.ERR_NOT_SUPPORT);
+}
+
+/**
+ * Throttle decorator
+ * @param {Function} fn
+ * @param {Number} freq
+ * @return {Function}
+ */
+function throttle(fn, freq) {
+  let timestamp = 0;
+  const threshold = 1000 / freq;
+  let timer = null;
+  return function throttled(force, args) {
+    const now = Date.now();
+    if (force || now - timestamp > threshold) {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      timestamp = now;
+      return fn.apply(null, args);
+    }
+    if (!timer) {
+      timer = setTimeout(() => {
+        timer = null;
+        timestamp = Date.now();
+        return fn.apply(null, args);
+      }, threshold - (now - timestamp));
+    }
+  };
+}
+
+/**
+ * Calculate data maxRate
+ * @param {Number} [samplesCount= 10]
+ * @param {Number} [min= 1000]
+ * @returns {Function}
+ */
+function speedometer(samplesCount, min) {
+  samplesCount = samplesCount || 10;
+  const bytes = new Array(samplesCount);
+  const timestamps = new Array(samplesCount);
+  let head = 0;
+  let tail = 0;
+  let firstSampleTS;
+
+  min = min !== undefined ? min : 1000;
+
+  return function push(chunkLength) {
+    const now = Date.now();
+
+    const startedAt = timestamps[tail];
+
+    if (!firstSampleTS) {
+      firstSampleTS = now;
+    }
+
+    bytes[head] = chunkLength;
+    timestamps[head] = now;
+
+    let i = tail;
+    let bytesCount = 0;
+
+    while (i !== head) {
+      bytesCount += bytes[i++];
+      i = i % samplesCount;
+    }
+
+    head = (head + 1) % samplesCount;
+
+    if (head === tail) {
+      tail = (tail + 1) % samplesCount;
+    }
+
+    if (now - firstSampleTS < min) {
+      return;
+    }
+
+    const passed = startedAt && now - startedAt;
+
+    return passed ? Math.round(bytesCount * 1000 / passed) : undefined;
+  };
+}
+
+const kInternals = Symbol('internals');
+
+class AxiosTransformStream extends stream__default["default"].Transform{
+  constructor(options) {
+    options = utils$1.toFlatObject(options, {
+      maxRate: 0,
+      chunkSize: 64 * 1024,
+      minChunkSize: 100,
+      timeWindow: 500,
+      ticksRate: 2,
+      samplesCount: 15
+    }, null, (prop, source) => {
+      return !utils$1.isUndefined(source[prop]);
+    });
+
+    super({
+      readableHighWaterMark: options.chunkSize
+    });
+
+    const self = this;
+
+    const internals = this[kInternals] = {
+      length: options.length,
+      timeWindow: options.timeWindow,
+      ticksRate: options.ticksRate,
+      chunkSize: options.chunkSize,
+      maxRate: options.maxRate,
+      minChunkSize: options.minChunkSize,
+      bytesSeen: 0,
+      isCaptured: false,
+      notifiedBytesLoaded: 0,
+      ts: Date.now(),
+      bytes: 0,
+      onReadCallback: null
+    };
+
+    const _speedometer = speedometer(internals.ticksRate * options.samplesCount, internals.timeWindow);
+
+    this.on('newListener', event => {
+      if (event === 'progress') {
+        if (!internals.isCaptured) {
+          internals.isCaptured = true;
+        }
+      }
+    });
+
+    let bytesNotified = 0;
+
+    internals.updateProgress = throttle(function throttledHandler() {
+      const totalBytes = internals.length;
+      const bytesTransferred = internals.bytesSeen;
+      const progressBytes = bytesTransferred - bytesNotified;
+      if (!progressBytes || self.destroyed) return;
+
+      const rate = _speedometer(progressBytes);
+
+      bytesNotified = bytesTransferred;
+
+      process.nextTick(() => {
+        self.emit('progress', {
+          'loaded': bytesTransferred,
+          'total': totalBytes,
+          'progress': totalBytes ? (bytesTransferred / totalBytes) : undefined,
+          'bytes': progressBytes,
+          'rate': rate ? rate : undefined,
+          'estimated': rate && totalBytes && bytesTransferred <= totalBytes ?
+            (totalBytes - bytesTransferred) / rate : undefined
+        });
+      });
+    }, internals.ticksRate);
+
+    const onFinish = () => {
+      internals.updateProgress(true);
+    };
+
+    this.once('end', onFinish);
+    this.once('error', onFinish);
+  }
+
+  _read(size) {
+    const internals = this[kInternals];
+
+    if (internals.onReadCallback) {
+      internals.onReadCallback();
+    }
+
+    return super._read(size);
+  }
+
+  _transform(chunk, encoding, callback) {
+    const self = this;
+    const internals = this[kInternals];
+    const maxRate = internals.maxRate;
+
+    const readableHighWaterMark = this.readableHighWaterMark;
+
+    const timeWindow = internals.timeWindow;
+
+    const divider = 1000 / timeWindow;
+    const bytesThreshold = (maxRate / divider);
+    const minChunkSize = internals.minChunkSize !== false ? Math.max(internals.minChunkSize, bytesThreshold * 0.01) : 0;
+
+    function pushChunk(_chunk, _callback) {
+      const bytes = Buffer.byteLength(_chunk);
+      internals.bytesSeen += bytes;
+      internals.bytes += bytes;
+
+      if (internals.isCaptured) {
+        internals.updateProgress();
+      }
+
+      if (self.push(_chunk)) {
+        process.nextTick(_callback);
+      } else {
+        internals.onReadCallback = () => {
+          internals.onReadCallback = null;
+          process.nextTick(_callback);
+        };
+      }
+    }
+
+    const transformChunk = (_chunk, _callback) => {
+      const chunkSize = Buffer.byteLength(_chunk);
+      let chunkRemainder = null;
+      let maxChunkSize = readableHighWaterMark;
+      let bytesLeft;
+      let passed = 0;
+
+      if (maxRate) {
+        const now = Date.now();
+
+        if (!internals.ts || (passed = (now - internals.ts)) >= timeWindow) {
+          internals.ts = now;
+          bytesLeft = bytesThreshold - internals.bytes;
+          internals.bytes = bytesLeft < 0 ? -bytesLeft : 0;
+          passed = 0;
+        }
+
+        bytesLeft = bytesThreshold - internals.bytes;
+      }
+
+      if (maxRate) {
+        if (bytesLeft <= 0) {
+          // next time window
+          return setTimeout(() => {
+            _callback(null, _chunk);
+          }, timeWindow - passed);
+        }
+
+        if (bytesLeft < maxChunkSize) {
+          maxChunkSize = bytesLeft;
+        }
+      }
+
+      if (maxChunkSize && chunkSize > maxChunkSize && (chunkSize - maxChunkSize) > minChunkSize) {
+        chunkRemainder = _chunk.subarray(maxChunkSize);
+        _chunk = _chunk.subarray(0, maxChunkSize);
+      }
+
+      pushChunk(_chunk, chunkRemainder ? () => {
+        process.nextTick(_callback, null, chunkRemainder);
+      } : _callback);
+    };
+
+    transformChunk(chunk, function transformNextChunk(err, _chunk) {
+      if (err) {
+        return callback(err);
+      }
+
+      if (_chunk) {
+        transformChunk(_chunk, transformNextChunk);
+      } else {
+        callback(null);
+      }
+    });
+  }
+
+  setLength(length) {
+    this[kInternals].length = +length;
+    return this;
+  }
+}
+
+const AxiosTransformStream$1 = AxiosTransformStream;
+
+const {asyncIterator} = Symbol;
+
+const readBlob = async function* (blob) {
+  if (blob.stream) {
+    yield* blob.stream();
+  } else if (blob.arrayBuffer) {
+    yield await blob.arrayBuffer();
+  } else if (blob[asyncIterator]) {
+    yield* blob[asyncIterator]();
+  } else {
+    yield blob;
+  }
+};
+
+const readBlob$1 = readBlob;
+
+const BOUNDARY_ALPHABET = utils$1.ALPHABET.ALPHA_DIGIT + '-_';
+
+const textEncoder = new util.TextEncoder();
+
+const CRLF = '\r\n';
+const CRLF_BYTES = textEncoder.encode(CRLF);
+const CRLF_BYTES_COUNT = 2;
+
+class FormDataPart {
+  constructor(name, value) {
+    const {escapeName} = this.constructor;
+    const isStringValue = utils$1.isString(value);
+
+    let headers = `Content-Disposition: form-data; name="${escapeName(name)}"${
+      !isStringValue && value.name ? `; filename="${escapeName(value.name)}"` : ''
+    }${CRLF}`;
+
+    if (isStringValue) {
+      value = textEncoder.encode(String(value).replace(/\r?\n|\r\n?/g, CRLF));
+    } else {
+      headers += `Content-Type: ${value.type || "application/octet-stream"}${CRLF}`;
+    }
+
+    this.headers = textEncoder.encode(headers + CRLF);
+
+    this.contentLength = isStringValue ? value.byteLength : value.size;
+
+    this.size = this.headers.byteLength + this.contentLength + CRLF_BYTES_COUNT;
+
+    this.name = name;
+    this.value = value;
+  }
+
+  async *encode(){
+    yield this.headers;
+
+    const {value} = this;
+
+    if(utils$1.isTypedArray(value)) {
+      yield value;
+    } else {
+      yield* readBlob$1(value);
+    }
+
+    yield CRLF_BYTES;
+  }
+
+  static escapeName(name) {
+      return String(name).replace(/[\r\n"]/g, (match) => ({
+        '\r' : '%0D',
+        '\n' : '%0A',
+        '"' : '%22',
+      }[match]));
+  }
+}
+
+const formDataToStream = (form, headersHandler, options) => {
+  const {
+    tag = 'form-data-boundary',
+    size = 25,
+    boundary = tag + '-' + utils$1.generateString(size, BOUNDARY_ALPHABET)
+  } = options || {};
+
+  if(!utils$1.isFormData(form)) {
+    throw TypeError('FormData instance required');
+  }
+
+  if (boundary.length < 1 || boundary.length > 70) {
+    throw Error('boundary must be 10-70 characters long')
+  }
+
+  const boundaryBytes = textEncoder.encode('--' + boundary + CRLF);
+  const footerBytes = textEncoder.encode('--' + boundary + '--' + CRLF + CRLF);
+  let contentLength = footerBytes.byteLength;
+
+  const parts = Array.from(form.entries()).map(([name, value]) => {
+    const part = new FormDataPart(name, value);
+    contentLength += part.size;
+    return part;
+  });
+
+  contentLength += boundaryBytes.byteLength * parts.length;
+
+  contentLength = utils$1.toFiniteNumber(contentLength);
+
+  const computedHeaders = {
+    'Content-Type': `multipart/form-data; boundary=${boundary}`
+  };
+
+  if (Number.isFinite(contentLength)) {
+    computedHeaders['Content-Length'] = contentLength;
+  }
+
+  headersHandler && headersHandler(computedHeaders);
+
+  return stream.Readable.from((async function *() {
+    for(const part of parts) {
+      yield boundaryBytes;
+      yield* part.encode();
+    }
+
+    yield footerBytes;
+  })());
+};
+
+const formDataToStream$1 = formDataToStream;
+
+class ZlibHeaderTransformStream extends stream__default["default"].Transform {
+  __transform(chunk, encoding, callback) {
+    this.push(chunk);
+    callback();
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (chunk.length !== 0) {
+      this._transform = this.__transform;
+
+      // Add Default Compression headers if no zlib headers are present
+      if (chunk[0] !== 120) { // Hex: 78
+        const header = Buffer.alloc(2);
+        header[0] = 120; // Hex: 78
+        header[1] = 156; // Hex: 9C 
+        this.push(header, encoding);
+      }
+    }
+
+    this.__transform(chunk, encoding, callback);
+  }
+}
+
+const ZlibHeaderTransformStream$1 = ZlibHeaderTransformStream;
+
+const callbackify = (fn, reducer) => {
+  return utils$1.isAsyncFn(fn) ? function (...args) {
+    const cb = args.pop();
+    fn.apply(this, args).then((value) => {
+      try {
+        reducer ? cb(null, ...reducer(value)) : cb(null, value);
+      } catch (err) {
+        cb(err);
+      }
+    }, cb);
+  } : fn;
+};
+
+const callbackify$1 = callbackify;
+
+const zlibOptions = {
+  flush: zlib__default["default"].constants.Z_SYNC_FLUSH,
+  finishFlush: zlib__default["default"].constants.Z_SYNC_FLUSH
+};
+
+const brotliOptions = {
+  flush: zlib__default["default"].constants.BROTLI_OPERATION_FLUSH,
+  finishFlush: zlib__default["default"].constants.BROTLI_OPERATION_FLUSH
+};
+
+const isBrotliSupported = utils$1.isFunction(zlib__default["default"].createBrotliDecompress);
+
+const {http: httpFollow, https: httpsFollow} = followRedirects__default["default"];
+
+const isHttps = /https:?/;
+
+const supportedProtocols = platform.protocols.map(protocol => {
+  return protocol + ':';
+});
+
+/**
+ * If the proxy or config beforeRedirects functions are defined, call them with the options
+ * object.
+ *
+ * @param {Object<string, any>} options - The options object that was passed to the request.
+ *
+ * @returns {Object<string, any>}
+ */
+function dispatchBeforeRedirect(options) {
+  if (options.beforeRedirects.proxy) {
+    options.beforeRedirects.proxy(options);
+  }
+  if (options.beforeRedirects.config) {
+    options.beforeRedirects.config(options);
+  }
+}
+
+/**
+ * If the proxy or config afterRedirects functions are defined, call them with the options
+ *
+ * @param {http.ClientRequestArgs} options
+ * @param {AxiosProxyConfig} configProxy configuration from Axios options object
+ * @param {string} location
+ *
+ * @returns {http.ClientRequestArgs}
+ */
+function setProxy(options, configProxy, location) {
+  let proxy = configProxy;
+  if (!proxy && proxy !== false) {
+    const proxyUrl = proxyFromEnv.getProxyForUrl(location);
+    if (proxyUrl) {
+      proxy = new URL(proxyUrl);
+    }
+  }
+  if (proxy) {
+    // Basic proxy authorization
+    if (proxy.username) {
+      proxy.auth = (proxy.username || '') + ':' + (proxy.password || '');
+    }
+
+    if (proxy.auth) {
+      // Support proxy auth object form
+      if (proxy.auth.username || proxy.auth.password) {
+        proxy.auth = (proxy.auth.username || '') + ':' + (proxy.auth.password || '');
+      }
+      const base64 = Buffer
+        .from(proxy.auth, 'utf8')
+        .toString('base64');
+      options.headers['Proxy-Authorization'] = 'Basic ' + base64;
+    }
+
+    options.headers.host = options.hostname + (options.port ? ':' + options.port : '');
+    const proxyHost = proxy.hostname || proxy.host;
+    options.hostname = proxyHost;
+    // Replace 'host' since options is not a URL object
+    options.host = proxyHost;
+    options.port = proxy.port;
+    options.path = location;
+    if (proxy.protocol) {
+      options.protocol = proxy.protocol.includes(':') ? proxy.protocol : `${proxy.protocol}:`;
+    }
+  }
+
+  options.beforeRedirects.proxy = function beforeRedirect(redirectOptions) {
+    // Configure proxy for redirected request, passing the original config proxy to apply
+    // the exact same logic as if the redirected request was performed by axios directly.
+    setProxy(redirectOptions, configProxy, redirectOptions.href);
+  };
+}
+
+const isHttpAdapterSupported = typeof process !== 'undefined' && utils$1.kindOf(process) === 'process';
+
+// temporary hotfix
+
+const wrapAsync = (asyncExecutor) => {
+  return new Promise((resolve, reject) => {
+    let onDone;
+    let isDone;
+
+    const done = (value, isRejected) => {
+      if (isDone) return;
+      isDone = true;
+      onDone && onDone(value, isRejected);
+    };
+
+    const _resolve = (value) => {
+      done(value);
+      resolve(value);
+    };
+
+    const _reject = (reason) => {
+      done(reason, true);
+      reject(reason);
+    };
+
+    asyncExecutor(_resolve, _reject, (onDoneHandler) => (onDone = onDoneHandler)).catch(_reject);
+  })
+};
+
+const resolveFamily = ({address, family}) => {
+  if (!utils$1.isString(address)) {
+    throw TypeError('address must be a string');
+  }
+  return ({
+    address,
+    family: family || (address.indexOf('.') < 0 ? 6 : 4)
+  });
+};
+
+const buildAddressEntry = (address, family) => resolveFamily(utils$1.isObject(address) ? address : {address, family});
+
+/*eslint consistent-return:0*/
+const httpAdapter = isHttpAdapterSupported && function httpAdapter(config) {
+  return wrapAsync(async function dispatchHttpRequest(resolve, reject, onDone) {
+    let {data, lookup, family} = config;
+    const {responseType, responseEncoding} = config;
+    const method = config.method.toUpperCase();
+    let isDone;
+    let rejected = false;
+    let req;
+
+    if (lookup) {
+      const _lookup = callbackify$1(lookup, (value) => utils$1.isArray(value) ? value : [value]);
+      // hotfix to support opt.all option which is required for node 20.x
+      lookup = (hostname, opt, cb) => {
+        _lookup(hostname, opt, (err, arg0, arg1) => {
+          const addresses = utils$1.isArray(arg0) ? arg0.map(addr => buildAddressEntry(addr)) : [buildAddressEntry(arg0, arg1)];
+
+          opt.all ? cb(err, addresses) : cb(err, addresses[0].address, addresses[0].family);
+        });
+      };
+    }
+
+    // temporary internal emitter until the AxiosRequest class will be implemented
+    const emitter = new EventEmitter__default["default"]();
+
+    const onFinished = () => {
+      if (config.cancelToken) {
+        config.cancelToken.unsubscribe(abort);
+      }
+
+      if (config.signal) {
+        config.signal.removeEventListener('abort', abort);
+      }
+
+      emitter.removeAllListeners();
+    };
+
+    onDone((value, isRejected) => {
+      isDone = true;
+      if (isRejected) {
+        rejected = true;
+        onFinished();
+      }
+    });
+
+    function abort(reason) {
+      emitter.emit('abort', !reason || reason.type ? new CanceledError(null, config, req) : reason);
+    }
+
+    emitter.once('abort', reject);
+
+    if (config.cancelToken || config.signal) {
+      config.cancelToken && config.cancelToken.subscribe(abort);
+      if (config.signal) {
+        config.signal.aborted ? abort() : config.signal.addEventListener('abort', abort);
+      }
+    }
+
+    // Parse url
+    const fullPath = buildFullPath(config.baseURL, config.url);
+    const parsed = new URL(fullPath, 'http://localhost');
+    const protocol = parsed.protocol || supportedProtocols[0];
+
+    if (protocol === 'data:') {
+      let convertedData;
+
+      if (method !== 'GET') {
+        return settle(resolve, reject, {
+          status: 405,
+          statusText: 'method not allowed',
+          headers: {},
+          config
+        });
+      }
+
+      try {
+        convertedData = fromDataURI(config.url, responseType === 'blob', {
+          Blob: config.env && config.env.Blob
+        });
+      } catch (err) {
+        throw AxiosError.from(err, AxiosError.ERR_BAD_REQUEST, config);
+      }
+
+      if (responseType === 'text') {
+        convertedData = convertedData.toString(responseEncoding);
+
+        if (!responseEncoding || responseEncoding === 'utf8') {
+          convertedData = utils$1.stripBOM(convertedData);
+        }
+      } else if (responseType === 'stream') {
+        convertedData = stream__default["default"].Readable.from(convertedData);
+      }
+
+      return settle(resolve, reject, {
+        data: convertedData,
+        status: 200,
+        statusText: 'OK',
+        headers: new AxiosHeaders$1(),
+        config
+      });
+    }
+
+    if (supportedProtocols.indexOf(protocol) === -1) {
+      return reject(new AxiosError(
+        'Unsupported protocol ' + protocol,
+        AxiosError.ERR_BAD_REQUEST,
+        config
+      ));
+    }
+
+    const headers = AxiosHeaders$1.from(config.headers).normalize();
+
+    // Set User-Agent (required by some servers)
+    // See https://github.com/axios/axios/issues/69
+    // User-Agent is specified; handle case where no UA header is desired
+    // Only set header if it hasn't been set in config
+    headers.set('User-Agent', 'axios/' + VERSION, false);
+
+    const onDownloadProgress = config.onDownloadProgress;
+    const onUploadProgress = config.onUploadProgress;
+    const maxRate = config.maxRate;
+    let maxUploadRate = undefined;
+    let maxDownloadRate = undefined;
+
+    // support for spec compliant FormData objects
+    if (utils$1.isSpecCompliantForm(data)) {
+      const userBoundary = headers.getContentType(/boundary=([-_\w\d]{10,70})/i);
+
+      data = formDataToStream$1(data, (formHeaders) => {
+        headers.set(formHeaders);
+      }, {
+        tag: `axios-${VERSION}-boundary`,
+        boundary: userBoundary && userBoundary[1] || undefined
+      });
+      // support for https://www.npmjs.com/package/form-data api
+    } else if (utils$1.isFormData(data) && utils$1.isFunction(data.getHeaders)) {
+      headers.set(data.getHeaders());
+
+      if (!headers.hasContentLength()) {
+        try {
+          const knownLength = await util__default["default"].promisify(data.getLength).call(data);
+          Number.isFinite(knownLength) && knownLength >= 0 && headers.setContentLength(knownLength);
+          /*eslint no-empty:0*/
+        } catch (e) {
+        }
+      }
+    } else if (utils$1.isBlob(data)) {
+      data.size && headers.setContentType(data.type || 'application/octet-stream');
+      headers.setContentLength(data.size || 0);
+      data = stream__default["default"].Readable.from(readBlob$1(data));
+    } else if (data && !utils$1.isStream(data)) {
+      if (Buffer.isBuffer(data)) ; else if (utils$1.isArrayBuffer(data)) {
+        data = Buffer.from(new Uint8Array(data));
+      } else if (utils$1.isString(data)) {
+        data = Buffer.from(data, 'utf-8');
+      } else {
+        return reject(new AxiosError(
+          'Data after transformation must be a string, an ArrayBuffer, a Buffer, or a Stream',
+          AxiosError.ERR_BAD_REQUEST,
+          config
+        ));
+      }
+
+      // Add Content-Length header if data exists
+      headers.setContentLength(data.length, false);
+
+      if (config.maxBodyLength > -1 && data.length > config.maxBodyLength) {
+        return reject(new AxiosError(
+          'Request body larger than maxBodyLength limit',
+          AxiosError.ERR_BAD_REQUEST,
+          config
+        ));
+      }
+    }
+
+    const contentLength = utils$1.toFiniteNumber(headers.getContentLength());
+
+    if (utils$1.isArray(maxRate)) {
+      maxUploadRate = maxRate[0];
+      maxDownloadRate = maxRate[1];
+    } else {
+      maxUploadRate = maxDownloadRate = maxRate;
+    }
+
+    if (data && (onUploadProgress || maxUploadRate)) {
+      if (!utils$1.isStream(data)) {
+        data = stream__default["default"].Readable.from(data, {objectMode: false});
+      }
+
+      data = stream__default["default"].pipeline([data, new AxiosTransformStream$1({
+        length: contentLength,
+        maxRate: utils$1.toFiniteNumber(maxUploadRate)
+      })], utils$1.noop);
+
+      onUploadProgress && data.on('progress', progress => {
+        onUploadProgress(Object.assign(progress, {
+          upload: true
+        }));
+      });
+    }
+
+    // HTTP basic authentication
+    let auth = undefined;
+    if (config.auth) {
+      const username = config.auth.username || '';
+      const password = config.auth.password || '';
+      auth = username + ':' + password;
+    }
+
+    if (!auth && parsed.username) {
+      const urlUsername = parsed.username;
+      const urlPassword = parsed.password;
+      auth = urlUsername + ':' + urlPassword;
+    }
+
+    auth && headers.delete('authorization');
+
+    let path;
+
+    try {
+      path = buildURL(
+        parsed.pathname + parsed.search,
+        config.params,
+        config.paramsSerializer
+      ).replace(/^\?/, '');
+    } catch (err) {
+      const customErr = new Error(err.message);
+      customErr.config = config;
+      customErr.url = config.url;
+      customErr.exists = true;
+      return reject(customErr);
+    }
+
+    headers.set(
+      'Accept-Encoding',
+      'gzip, compress, deflate' + (isBrotliSupported ? ', br' : ''), false
+      );
+
+    const options = {
+      path,
+      method: method,
+      headers: headers.toJSON(),
+      agents: { http: config.httpAgent, https: config.httpsAgent },
+      auth,
+      protocol,
+      family,
+      beforeRedirect: dispatchBeforeRedirect,
+      beforeRedirects: {}
+    };
+
+    // cacheable-lookup integration hotfix
+    !utils$1.isUndefined(lookup) && (options.lookup = lookup);
+
+    if (config.socketPath) {
+      options.socketPath = config.socketPath;
+    } else {
+      options.hostname = parsed.hostname;
+      options.port = parsed.port;
+      setProxy(options, config.proxy, protocol + '//' + parsed.hostname + (parsed.port ? ':' + parsed.port : '') + options.path);
+    }
+
+    let transport;
+    const isHttpsRequest = isHttps.test(options.protocol);
+    options.agent = isHttpsRequest ? config.httpsAgent : config.httpAgent;
+    if (config.transport) {
+      transport = config.transport;
+    } else if (config.maxRedirects === 0) {
+      transport = isHttpsRequest ? https__default["default"] : http__default["default"];
+    } else {
+      if (config.maxRedirects) {
+        options.maxRedirects = config.maxRedirects;
+      }
+      if (config.beforeRedirect) {
+        options.beforeRedirects.config = config.beforeRedirect;
+      }
+      transport = isHttpsRequest ? httpsFollow : httpFollow;
+    }
+
+    if (config.maxBodyLength > -1) {
+      options.maxBodyLength = config.maxBodyLength;
+    } else {
+      // follow-redirects does not skip comparison, so it should always succeed for axios -1 unlimited
+      options.maxBodyLength = Infinity;
+    }
+
+    if (config.insecureHTTPParser) {
+      options.insecureHTTPParser = config.insecureHTTPParser;
+    }
+
+    // Create the request
+    req = transport.request(options, function handleResponse(res) {
+      if (req.destroyed) return;
+
+      const streams = [res];
+
+      const responseLength = +res.headers['content-length'];
+
+      if (onDownloadProgress) {
+        const transformStream = new AxiosTransformStream$1({
+          length: utils$1.toFiniteNumber(responseLength),
+          maxRate: utils$1.toFiniteNumber(maxDownloadRate)
+        });
+
+        onDownloadProgress && transformStream.on('progress', progress => {
+          onDownloadProgress(Object.assign(progress, {
+            download: true
+          }));
+        });
+
+        streams.push(transformStream);
+      }
+
+      // decompress the response body transparently if required
+      let responseStream = res;
+
+      // return the last request in case of redirects
+      const lastRequest = res.req || req;
+
+      // if decompress disabled we should not decompress
+      if (config.decompress !== false && res.headers['content-encoding']) {
+        // if no content, but headers still say that it is encoded,
+        // remove the header not confuse downstream operations
+        if (method === 'HEAD' || res.statusCode === 204) {
+          delete res.headers['content-encoding'];
+        }
+
+        switch ((res.headers['content-encoding'] || '').toLowerCase()) {
+        /*eslint default-case:0*/
+        case 'gzip':
+        case 'x-gzip':
+        case 'compress':
+        case 'x-compress':
+          // add the unzipper to the body stream processing pipeline
+          streams.push(zlib__default["default"].createUnzip(zlibOptions));
+
+          // remove the content-encoding in order to not confuse downstream operations
+          delete res.headers['content-encoding'];
+          break;
+        case 'deflate':
+          streams.push(new ZlibHeaderTransformStream$1());
+
+          // add the unzipper to the body stream processing pipeline
+          streams.push(zlib__default["default"].createUnzip(zlibOptions));
+
+          // remove the content-encoding in order to not confuse downstream operations
+          delete res.headers['content-encoding'];
+          break;
+        case 'br':
+          if (isBrotliSupported) {
+            streams.push(zlib__default["default"].createBrotliDecompress(brotliOptions));
+            delete res.headers['content-encoding'];
+          }
+        }
+      }
+
+      responseStream = streams.length > 1 ? stream__default["default"].pipeline(streams, utils$1.noop) : streams[0];
+
+      const offListeners = stream__default["default"].finished(responseStream, () => {
+        offListeners();
+        onFinished();
+      });
+
+      const response = {
+        status: res.statusCode,
+        statusText: res.statusMessage,
+        headers: new AxiosHeaders$1(res.headers),
+        config,
+        request: lastRequest
+      };
+
+      if (responseType === 'stream') {
+        response.data = responseStream;
+        settle(resolve, reject, response);
+      } else {
+        const responseBuffer = [];
+        let totalResponseBytes = 0;
+
+        responseStream.on('data', function handleStreamData(chunk) {
+          responseBuffer.push(chunk);
+          totalResponseBytes += chunk.length;
+
+          // make sure the content length is not over the maxContentLength if specified
+          if (config.maxContentLength > -1 && totalResponseBytes > config.maxContentLength) {
+            // stream.destroy() emit aborted event before calling reject() on Node.js v16
+            rejected = true;
+            responseStream.destroy();
+            reject(new AxiosError('maxContentLength size of ' + config.maxContentLength + ' exceeded',
+              AxiosError.ERR_BAD_RESPONSE, config, lastRequest));
+          }
+        });
+
+        responseStream.on('aborted', function handlerStreamAborted() {
+          if (rejected) {
+            return;
+          }
+
+          const err = new AxiosError(
+            'maxContentLength size of ' + config.maxContentLength + ' exceeded',
+            AxiosError.ERR_BAD_RESPONSE,
+            config,
+            lastRequest
+          );
+          responseStream.destroy(err);
+          reject(err);
+        });
+
+        responseStream.on('error', function handleStreamError(err) {
+          if (req.destroyed) return;
+          reject(AxiosError.from(err, null, config, lastRequest));
+        });
+
+        responseStream.on('end', function handleStreamEnd() {
+          try {
+            let responseData = responseBuffer.length === 1 ? responseBuffer[0] : Buffer.concat(responseBuffer);
+            if (responseType !== 'arraybuffer') {
+              responseData = responseData.toString(responseEncoding);
+              if (!responseEncoding || responseEncoding === 'utf8') {
+                responseData = utils$1.stripBOM(responseData);
+              }
+            }
+            response.data = responseData;
+          } catch (err) {
+            return reject(AxiosError.from(err, null, config, response.request, response));
+          }
+          settle(resolve, reject, response);
+        });
+      }
+
+      emitter.once('abort', err => {
+        if (!responseStream.destroyed) {
+          responseStream.emit('error', err);
+          responseStream.destroy();
+        }
+      });
+    });
+
+    emitter.once('abort', err => {
+      reject(err);
+      req.destroy(err);
+    });
+
+    // Handle errors
+    req.on('error', function handleRequestError(err) {
+      // @todo remove
+      // if (req.aborted && err.code !== AxiosError.ERR_FR_TOO_MANY_REDIRECTS) return;
+      reject(AxiosError.from(err, null, config, req));
+    });
+
+    // set tcp keep alive to prevent drop connection by peer
+    req.on('socket', function handleRequestSocket(socket) {
+      // default interval of sending ack packet is 1 minute
+      socket.setKeepAlive(true, 1000 * 60);
+    });
+
+    // Handle request timeout
+    if (config.timeout) {
+      // This is forcing a int timeout to avoid problems if the `req` interface doesn't handle other types.
+      const timeout = parseInt(config.timeout, 10);
+
+      if (Number.isNaN(timeout)) {
+        reject(new AxiosError(
+          'error trying to parse `config.timeout` to int',
+          AxiosError.ERR_BAD_OPTION_VALUE,
+          config,
+          req
+        ));
+
+        return;
+      }
+
+      // Sometime, the response will be very slow, and does not respond, the connect event will be block by event loop system.
+      // And timer callback will be fired, and abort() will be invoked before connection, then get "socket hang up" and code ECONNRESET.
+      // At this time, if we have a large number of request, nodejs will hang up some socket on background. and the number will up and up.
+      // And then these socket which be hang up will devouring CPU little by little.
+      // ClientRequest.setTimeout will be fired on the specify milliseconds, and can make sure that abort() will be fired after connect.
+      req.setTimeout(timeout, function handleRequestTimeout() {
+        if (isDone) return;
+        let timeoutErrorMessage = config.timeout ? 'timeout of ' + config.timeout + 'ms exceeded' : 'timeout exceeded';
+        const transitional = config.transitional || transitionalDefaults;
+        if (config.timeoutErrorMessage) {
+          timeoutErrorMessage = config.timeoutErrorMessage;
+        }
+        reject(new AxiosError(
+          timeoutErrorMessage,
+          transitional.clarifyTimeoutError ? AxiosError.ETIMEDOUT : AxiosError.ECONNABORTED,
+          config,
+          req
+        ));
+        abort();
+      });
+    }
+
+
+    // Send the request
+    if (utils$1.isStream(data)) {
+      let ended = false;
+      let errored = false;
+
+      data.on('end', () => {
+        ended = true;
+      });
+
+      data.once('error', err => {
+        errored = true;
+        req.destroy(err);
+      });
+
+      data.on('close', () => {
+        if (!ended && !errored) {
+          abort(new CanceledError('Request stream has been aborted', config, req));
+        }
+      });
+
+      data.pipe(req);
+    } else {
+      req.end(data);
+    }
+  });
+};
+
+const cookies = platform.hasStandardBrowserEnv ?
+
+  // Standard browser envs support document.cookie
+  {
+    write(name, value, expires, path, domain, secure) {
+      const cookie = [name + '=' + encodeURIComponent(value)];
+
+      utils$1.isNumber(expires) && cookie.push('expires=' + new Date(expires).toGMTString());
+
+      utils$1.isString(path) && cookie.push('path=' + path);
+
+      utils$1.isString(domain) && cookie.push('domain=' + domain);
+
+      secure === true && cookie.push('secure');
+
+      document.cookie = cookie.join('; ');
+    },
+
+    read(name) {
+      const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+      return (match ? decodeURIComponent(match[3]) : null);
+    },
+
+    remove(name) {
+      this.write(name, '', Date.now() - 86400000);
+    }
+  }
+
+  :
+
+  // Non-standard browser env (web workers, react-native) lack needed support.
+  {
+    write() {},
+    read() {
+      return null;
+    },
+    remove() {}
+  };
+
+const isURLSameOrigin = platform.hasStandardBrowserEnv ?
+
+// Standard browser envs have full support of the APIs needed to test
+// whether the request URL is of the same origin as current location.
+  (function standardBrowserEnv() {
+    const msie = /(msie|trident)/i.test(navigator.userAgent);
+    const urlParsingNode = document.createElement('a');
+    let originURL;
+
+    /**
+    * Parse a URL to discover its components
+    *
+    * @param {String} url The URL to be parsed
+    * @returns {Object}
+    */
+    function resolveURL(url) {
+      let href = url;
+
+      if (msie) {
+        // IE needs attribute set twice to normalize properties
+        urlParsingNode.setAttribute('href', href);
+        href = urlParsingNode.href;
+      }
+
+      urlParsingNode.setAttribute('href', href);
+
+      // urlParsingNode provides the UrlUtils interface - http://url.spec.whatwg.org/#urlutils
+      return {
+        href: urlParsingNode.href,
+        protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
+        host: urlParsingNode.host,
+        search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
+        hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
+        hostname: urlParsingNode.hostname,
+        port: urlParsingNode.port,
+        pathname: (urlParsingNode.pathname.charAt(0) === '/') ?
+          urlParsingNode.pathname :
+          '/' + urlParsingNode.pathname
+      };
+    }
+
+    originURL = resolveURL(window.location.href);
+
+    /**
+    * Determine if a URL shares the same origin as the current location
+    *
+    * @param {String} requestURL The URL to test
+    * @returns {boolean} True if URL shares the same origin, otherwise false
+    */
+    return function isURLSameOrigin(requestURL) {
+      const parsed = (utils$1.isString(requestURL)) ? resolveURL(requestURL) : requestURL;
+      return (parsed.protocol === originURL.protocol &&
+          parsed.host === originURL.host);
+    };
+  })() :
+
+  // Non standard browser envs (web workers, react-native) lack needed support.
+  (function nonStandardBrowserEnv() {
+    return function isURLSameOrigin() {
+      return true;
+    };
+  })();
+
+function progressEventReducer(listener, isDownloadStream) {
+  let bytesNotified = 0;
+  const _speedometer = speedometer(50, 250);
+
+  return e => {
+    const loaded = e.loaded;
+    const total = e.lengthComputable ? e.total : undefined;
+    const progressBytes = loaded - bytesNotified;
+    const rate = _speedometer(progressBytes);
+    const inRange = loaded <= total;
+
+    bytesNotified = loaded;
+
+    const data = {
+      loaded,
+      total,
+      progress: total ? (loaded / total) : undefined,
+      bytes: progressBytes,
+      rate: rate ? rate : undefined,
+      estimated: rate && total && inRange ? (total - loaded) / rate : undefined,
+      event: e
+    };
+
+    data[isDownloadStream ? 'download' : 'upload'] = true;
+
+    listener(data);
+  };
+}
+
+const isXHRAdapterSupported = typeof XMLHttpRequest !== 'undefined';
+
+const xhrAdapter = isXHRAdapterSupported && function (config) {
+  return new Promise(function dispatchXhrRequest(resolve, reject) {
+    let requestData = config.data;
+    const requestHeaders = AxiosHeaders$1.from(config.headers).normalize();
+    let {responseType, withXSRFToken} = config;
+    let onCanceled;
+    function done() {
+      if (config.cancelToken) {
+        config.cancelToken.unsubscribe(onCanceled);
+      }
+
+      if (config.signal) {
+        config.signal.removeEventListener('abort', onCanceled);
+      }
+    }
+
+    let contentType;
+
+    if (utils$1.isFormData(requestData)) {
+      if (platform.hasStandardBrowserEnv || platform.hasStandardBrowserWebWorkerEnv) {
+        requestHeaders.setContentType(false); // Let the browser set it
+      } else if ((contentType = requestHeaders.getContentType()) !== false) {
+        // fix semicolon duplication issue for ReactNative FormData implementation
+        const [type, ...tokens] = contentType ? contentType.split(';').map(token => token.trim()).filter(Boolean) : [];
+        requestHeaders.setContentType([type || 'multipart/form-data', ...tokens].join('; '));
+      }
+    }
+
+    let request = new XMLHttpRequest();
+
+    // HTTP basic authentication
+    if (config.auth) {
+      const username = config.auth.username || '';
+      const password = config.auth.password ? unescape(encodeURIComponent(config.auth.password)) : '';
+      requestHeaders.set('Authorization', 'Basic ' + btoa(username + ':' + password));
+    }
+
+    const fullPath = buildFullPath(config.baseURL, config.url);
+
+    request.open(config.method.toUpperCase(), buildURL(fullPath, config.params, config.paramsSerializer), true);
+
+    // Set the request timeout in MS
+    request.timeout = config.timeout;
+
+    function onloadend() {
+      if (!request) {
+        return;
+      }
+      // Prepare the response
+      const responseHeaders = AxiosHeaders$1.from(
+        'getAllResponseHeaders' in request && request.getAllResponseHeaders()
+      );
+      const responseData = !responseType || responseType === 'text' || responseType === 'json' ?
+        request.responseText : request.response;
+      const response = {
+        data: responseData,
+        status: request.status,
+        statusText: request.statusText,
+        headers: responseHeaders,
+        config,
+        request
+      };
+
+      settle(function _resolve(value) {
+        resolve(value);
+        done();
+      }, function _reject(err) {
+        reject(err);
+        done();
+      }, response);
+
+      // Clean up request
+      request = null;
+    }
+
+    if ('onloadend' in request) {
+      // Use onloadend if available
+      request.onloadend = onloadend;
+    } else {
+      // Listen for ready state to emulate onloadend
+      request.onreadystatechange = function handleLoad() {
+        if (!request || request.readyState !== 4) {
+          return;
+        }
+
+        // The request errored out and we didn't get a response, this will be
+        // handled by onerror instead
+        // With one exception: request that using file: protocol, most browsers
+        // will return status as 0 even though it's a successful request
+        if (request.status === 0 && !(request.responseURL && request.responseURL.indexOf('file:') === 0)) {
+          return;
+        }
+        // readystate handler is calling before onerror or ontimeout handlers,
+        // so we should call onloadend on the next 'tick'
+        setTimeout(onloadend);
+      };
+    }
+
+    // Handle browser request cancellation (as opposed to a manual cancellation)
+    request.onabort = function handleAbort() {
+      if (!request) {
+        return;
+      }
+
+      reject(new AxiosError('Request aborted', AxiosError.ECONNABORTED, config, request));
+
+      // Clean up request
+      request = null;
+    };
+
+    // Handle low level network errors
+    request.onerror = function handleError() {
+      // Real errors are hidden from us by the browser
+      // onerror should only fire if it's a network error
+      reject(new AxiosError('Network Error', AxiosError.ERR_NETWORK, config, request));
+
+      // Clean up request
+      request = null;
+    };
+
+    // Handle timeout
+    request.ontimeout = function handleTimeout() {
+      let timeoutErrorMessage = config.timeout ? 'timeout of ' + config.timeout + 'ms exceeded' : 'timeout exceeded';
+      const transitional = config.transitional || transitionalDefaults;
+      if (config.timeoutErrorMessage) {
+        timeoutErrorMessage = config.timeoutErrorMessage;
+      }
+      reject(new AxiosError(
+        timeoutErrorMessage,
+        transitional.clarifyTimeoutError ? AxiosError.ETIMEDOUT : AxiosError.ECONNABORTED,
+        config,
+        request));
+
+      // Clean up request
+      request = null;
+    };
+
+    // Add xsrf header
+    // This is only done if running in a standard browser environment.
+    // Specifically not if we're in a web worker, or react-native.
+    if(platform.hasStandardBrowserEnv) {
+      withXSRFToken && utils$1.isFunction(withXSRFToken) && (withXSRFToken = withXSRFToken(config));
+
+      if (withXSRFToken || (withXSRFToken !== false && isURLSameOrigin(fullPath))) {
+        // Add xsrf header
+        const xsrfValue = config.xsrfHeaderName && config.xsrfCookieName && cookies.read(config.xsrfCookieName);
+
+        if (xsrfValue) {
+          requestHeaders.set(config.xsrfHeaderName, xsrfValue);
+        }
+      }
+    }
+
+    // Remove Content-Type if data is undefined
+    requestData === undefined && requestHeaders.setContentType(null);
+
+    // Add headers to the request
+    if ('setRequestHeader' in request) {
+      utils$1.forEach(requestHeaders.toJSON(), function setRequestHeader(val, key) {
+        request.setRequestHeader(key, val);
+      });
+    }
+
+    // Add withCredentials to request if needed
+    if (!utils$1.isUndefined(config.withCredentials)) {
+      request.withCredentials = !!config.withCredentials;
+    }
+
+    // Add responseType to request if needed
+    if (responseType && responseType !== 'json') {
+      request.responseType = config.responseType;
+    }
+
+    // Handle progress if needed
+    if (typeof config.onDownloadProgress === 'function') {
+      request.addEventListener('progress', progressEventReducer(config.onDownloadProgress, true));
+    }
+
+    // Not all browsers support upload events
+    if (typeof config.onUploadProgress === 'function' && request.upload) {
+      request.upload.addEventListener('progress', progressEventReducer(config.onUploadProgress));
+    }
+
+    if (config.cancelToken || config.signal) {
+      // Handle cancellation
+      // eslint-disable-next-line func-names
+      onCanceled = cancel => {
+        if (!request) {
+          return;
+        }
+        reject(!cancel || cancel.type ? new CanceledError(null, config, request) : cancel);
+        request.abort();
+        request = null;
+      };
+
+      config.cancelToken && config.cancelToken.subscribe(onCanceled);
+      if (config.signal) {
+        config.signal.aborted ? onCanceled() : config.signal.addEventListener('abort', onCanceled);
+      }
+    }
+
+    const protocol = parseProtocol(fullPath);
+
+    if (protocol && platform.protocols.indexOf(protocol) === -1) {
+      reject(new AxiosError('Unsupported protocol ' + protocol + ':', AxiosError.ERR_BAD_REQUEST, config));
+      return;
+    }
+
+
+    // Send the request
+    request.send(requestData || null);
+  });
+};
+
+const knownAdapters = {
+  http: httpAdapter,
+  xhr: xhrAdapter
+};
+
+utils$1.forEach(knownAdapters, (fn, value) => {
+  if (fn) {
+    try {
+      Object.defineProperty(fn, 'name', {value});
+    } catch (e) {
+      // eslint-disable-next-line no-empty
+    }
+    Object.defineProperty(fn, 'adapterName', {value});
+  }
+});
+
+const renderReason = (reason) => `- ${reason}`;
+
+const isResolvedHandle = (adapter) => utils$1.isFunction(adapter) || adapter === null || adapter === false;
+
+const adapters = {
+  getAdapter: (adapters) => {
+    adapters = utils$1.isArray(adapters) ? adapters : [adapters];
+
+    const {length} = adapters;
+    let nameOrAdapter;
+    let adapter;
+
+    const rejectedReasons = {};
+
+    for (let i = 0; i < length; i++) {
+      nameOrAdapter = adapters[i];
+      let id;
+
+      adapter = nameOrAdapter;
+
+      if (!isResolvedHandle(nameOrAdapter)) {
+        adapter = knownAdapters[(id = String(nameOrAdapter)).toLowerCase()];
+
+        if (adapter === undefined) {
+          throw new AxiosError(`Unknown adapter '${id}'`);
+        }
+      }
+
+      if (adapter) {
+        break;
+      }
+
+      rejectedReasons[id || '#' + i] = adapter;
+    }
+
+    if (!adapter) {
+
+      const reasons = Object.entries(rejectedReasons)
+        .map(([id, state]) => `adapter ${id} ` +
+          (state === false ? 'is not supported by the environment' : 'is not available in the build')
+        );
+
+      let s = length ?
+        (reasons.length > 1 ? 'since :\n' + reasons.map(renderReason).join('\n') : ' ' + renderReason(reasons[0])) :
+        'as no adapter specified';
+
+      throw new AxiosError(
+        `There is no suitable adapter to dispatch the request ` + s,
+        'ERR_NOT_SUPPORT'
+      );
+    }
+
+    return adapter;
+  },
+  adapters: knownAdapters
+};
+
+/**
+ * Throws a `CanceledError` if cancellation has been requested.
+ *
+ * @param {Object} config The config that is to be used for the request
+ *
+ * @returns {void}
+ */
+function throwIfCancellationRequested(config) {
+  if (config.cancelToken) {
+    config.cancelToken.throwIfRequested();
+  }
+
+  if (config.signal && config.signal.aborted) {
+    throw new CanceledError(null, config);
+  }
+}
+
+/**
+ * Dispatch a request to the server using the configured adapter.
+ *
+ * @param {object} config The config that is to be used for the request
+ *
+ * @returns {Promise} The Promise to be fulfilled
+ */
+function dispatchRequest(config) {
+  throwIfCancellationRequested(config);
+
+  config.headers = AxiosHeaders$1.from(config.headers);
+
+  // Transform request data
+  config.data = transformData.call(
+    config,
+    config.transformRequest
+  );
+
+  if (['post', 'put', 'patch'].indexOf(config.method) !== -1) {
+    config.headers.setContentType('application/x-www-form-urlencoded', false);
+  }
+
+  const adapter = adapters.getAdapter(config.adapter || defaults$1.adapter);
+
+  return adapter(config).then(function onAdapterResolution(response) {
+    throwIfCancellationRequested(config);
+
+    // Transform response data
+    response.data = transformData.call(
+      config,
+      config.transformResponse,
+      response
+    );
+
+    response.headers = AxiosHeaders$1.from(response.headers);
+
+    return response;
+  }, function onAdapterRejection(reason) {
+    if (!isCancel(reason)) {
+      throwIfCancellationRequested(config);
+
+      // Transform response data
+      if (reason && reason.response) {
+        reason.response.data = transformData.call(
+          config,
+          config.transformResponse,
+          reason.response
+        );
+        reason.response.headers = AxiosHeaders$1.from(reason.response.headers);
+      }
+    }
+
+    return Promise.reject(reason);
+  });
+}
+
+const headersToObject = (thing) => thing instanceof AxiosHeaders$1 ? thing.toJSON() : thing;
+
+/**
+ * Config-specific merge-function which creates a new config-object
+ * by merging two configuration objects together.
+ *
+ * @param {Object} config1
+ * @param {Object} config2
+ *
+ * @returns {Object} New object resulting from merging config2 to config1
+ */
+function mergeConfig(config1, config2) {
+  // eslint-disable-next-line no-param-reassign
+  config2 = config2 || {};
+  const config = {};
+
+  function getMergedValue(target, source, caseless) {
+    if (utils$1.isPlainObject(target) && utils$1.isPlainObject(source)) {
+      return utils$1.merge.call({caseless}, target, source);
+    } else if (utils$1.isPlainObject(source)) {
+      return utils$1.merge({}, source);
+    } else if (utils$1.isArray(source)) {
+      return source.slice();
+    }
+    return source;
+  }
+
+  // eslint-disable-next-line consistent-return
+  function mergeDeepProperties(a, b, caseless) {
+    if (!utils$1.isUndefined(b)) {
+      return getMergedValue(a, b, caseless);
+    } else if (!utils$1.isUndefined(a)) {
+      return getMergedValue(undefined, a, caseless);
+    }
+  }
+
+  // eslint-disable-next-line consistent-return
+  function valueFromConfig2(a, b) {
+    if (!utils$1.isUndefined(b)) {
+      return getMergedValue(undefined, b);
+    }
+  }
+
+  // eslint-disable-next-line consistent-return
+  function defaultToConfig2(a, b) {
+    if (!utils$1.isUndefined(b)) {
+      return getMergedValue(undefined, b);
+    } else if (!utils$1.isUndefined(a)) {
+      return getMergedValue(undefined, a);
+    }
+  }
+
+  // eslint-disable-next-line consistent-return
+  function mergeDirectKeys(a, b, prop) {
+    if (prop in config2) {
+      return getMergedValue(a, b);
+    } else if (prop in config1) {
+      return getMergedValue(undefined, a);
+    }
+  }
+
+  const mergeMap = {
+    url: valueFromConfig2,
+    method: valueFromConfig2,
+    data: valueFromConfig2,
+    baseURL: defaultToConfig2,
+    transformRequest: defaultToConfig2,
+    transformResponse: defaultToConfig2,
+    paramsSerializer: defaultToConfig2,
+    timeout: defaultToConfig2,
+    timeoutMessage: defaultToConfig2,
+    withCredentials: defaultToConfig2,
+    withXSRFToken: defaultToConfig2,
+    adapter: defaultToConfig2,
+    responseType: defaultToConfig2,
+    xsrfCookieName: defaultToConfig2,
+    xsrfHeaderName: defaultToConfig2,
+    onUploadProgress: defaultToConfig2,
+    onDownloadProgress: defaultToConfig2,
+    decompress: defaultToConfig2,
+    maxContentLength: defaultToConfig2,
+    maxBodyLength: defaultToConfig2,
+    beforeRedirect: defaultToConfig2,
+    transport: defaultToConfig2,
+    httpAgent: defaultToConfig2,
+    httpsAgent: defaultToConfig2,
+    cancelToken: defaultToConfig2,
+    socketPath: defaultToConfig2,
+    responseEncoding: defaultToConfig2,
+    validateStatus: mergeDirectKeys,
+    headers: (a, b) => mergeDeepProperties(headersToObject(a), headersToObject(b), true)
+  };
+
+  utils$1.forEach(Object.keys(Object.assign({}, config1, config2)), function computeConfigValue(prop) {
+    const merge = mergeMap[prop] || mergeDeepProperties;
+    const configValue = merge(config1[prop], config2[prop], prop);
+    (utils$1.isUndefined(configValue) && merge !== mergeDirectKeys) || (config[prop] = configValue);
+  });
+
+  return config;
+}
+
+const validators$1 = {};
+
+// eslint-disable-next-line func-names
+['object', 'boolean', 'number', 'function', 'string', 'symbol'].forEach((type, i) => {
+  validators$1[type] = function validator(thing) {
+    return typeof thing === type || 'a' + (i < 1 ? 'n ' : ' ') + type;
+  };
+});
+
+const deprecatedWarnings = {};
+
+/**
+ * Transitional option validator
+ *
+ * @param {function|boolean?} validator - set to false if the transitional option has been removed
+ * @param {string?} version - deprecated version / removed since version
+ * @param {string?} message - some message with additional info
+ *
+ * @returns {function}
+ */
+validators$1.transitional = function transitional(validator, version, message) {
+  function formatMessage(opt, desc) {
+    return '[Axios v' + VERSION + '] Transitional option \'' + opt + '\'' + desc + (message ? '. ' + message : '');
+  }
+
+  // eslint-disable-next-line func-names
+  return (value, opt, opts) => {
+    if (validator === false) {
+      throw new AxiosError(
+        formatMessage(opt, ' has been removed' + (version ? ' in ' + version : '')),
+        AxiosError.ERR_DEPRECATED
+      );
+    }
+
+    if (version && !deprecatedWarnings[opt]) {
+      deprecatedWarnings[opt] = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        formatMessage(
+          opt,
+          ' has been deprecated since v' + version + ' and will be removed in the near future'
+        )
+      );
+    }
+
+    return validator ? validator(value, opt, opts) : true;
+  };
+};
+
+/**
+ * Assert object's properties type
+ *
+ * @param {object} options
+ * @param {object} schema
+ * @param {boolean?} allowUnknown
+ *
+ * @returns {object}
+ */
+
+function assertOptions(options, schema, allowUnknown) {
+  if (typeof options !== 'object') {
+    throw new AxiosError('options must be an object', AxiosError.ERR_BAD_OPTION_VALUE);
+  }
+  const keys = Object.keys(options);
+  let i = keys.length;
+  while (i-- > 0) {
+    const opt = keys[i];
+    const validator = schema[opt];
+    if (validator) {
+      const value = options[opt];
+      const result = value === undefined || validator(value, opt, options);
+      if (result !== true) {
+        throw new AxiosError('option ' + opt + ' must be ' + result, AxiosError.ERR_BAD_OPTION_VALUE);
+      }
+      continue;
+    }
+    if (allowUnknown !== true) {
+      throw new AxiosError('Unknown option ' + opt, AxiosError.ERR_BAD_OPTION);
+    }
+  }
+}
+
+const validator = {
+  assertOptions,
+  validators: validators$1
+};
+
+const validators = validator.validators;
+
+/**
+ * Create a new instance of Axios
+ *
+ * @param {Object} instanceConfig The default config for the instance
+ *
+ * @return {Axios} A new instance of Axios
+ */
+class Axios {
+  constructor(instanceConfig) {
+    this.defaults = instanceConfig;
+    this.interceptors = {
+      request: new InterceptorManager$1(),
+      response: new InterceptorManager$1()
+    };
+  }
+
+  /**
+   * Dispatch a request
+   *
+   * @param {String|Object} configOrUrl The config specific for this request (merged with this.defaults)
+   * @param {?Object} config
+   *
+   * @returns {Promise} The Promise to be fulfilled
+   */
+  request(configOrUrl, config) {
+    /*eslint no-param-reassign:0*/
+    // Allow for axios('example/url'[, config]) a la fetch API
+    if (typeof configOrUrl === 'string') {
+      config = config || {};
+      config.url = configOrUrl;
+    } else {
+      config = configOrUrl || {};
+    }
+
+    config = mergeConfig(this.defaults, config);
+
+    const {transitional, paramsSerializer, headers} = config;
+
+    if (transitional !== undefined) {
+      validator.assertOptions(transitional, {
+        silentJSONParsing: validators.transitional(validators.boolean),
+        forcedJSONParsing: validators.transitional(validators.boolean),
+        clarifyTimeoutError: validators.transitional(validators.boolean)
+      }, false);
+    }
+
+    if (paramsSerializer != null) {
+      if (utils$1.isFunction(paramsSerializer)) {
+        config.paramsSerializer = {
+          serialize: paramsSerializer
+        };
+      } else {
+        validator.assertOptions(paramsSerializer, {
+          encode: validators.function,
+          serialize: validators.function
+        }, true);
+      }
+    }
+
+    // Set config.method
+    config.method = (config.method || this.defaults.method || 'get').toLowerCase();
+
+    // Flatten headers
+    let contextHeaders = headers && utils$1.merge(
+      headers.common,
+      headers[config.method]
+    );
+
+    headers && utils$1.forEach(
+      ['delete', 'get', 'head', 'post', 'put', 'patch', 'common'],
+      (method) => {
+        delete headers[method];
+      }
+    );
+
+    config.headers = AxiosHeaders$1.concat(contextHeaders, headers);
+
+    // filter out skipped interceptors
+    const requestInterceptorChain = [];
+    let synchronousRequestInterceptors = true;
+    this.interceptors.request.forEach(function unshiftRequestInterceptors(interceptor) {
+      if (typeof interceptor.runWhen === 'function' && interceptor.runWhen(config) === false) {
+        return;
+      }
+
+      synchronousRequestInterceptors = synchronousRequestInterceptors && interceptor.synchronous;
+
+      requestInterceptorChain.unshift(interceptor.fulfilled, interceptor.rejected);
+    });
+
+    const responseInterceptorChain = [];
+    this.interceptors.response.forEach(function pushResponseInterceptors(interceptor) {
+      responseInterceptorChain.push(interceptor.fulfilled, interceptor.rejected);
+    });
+
+    let promise;
+    let i = 0;
+    let len;
+
+    if (!synchronousRequestInterceptors) {
+      const chain = [dispatchRequest.bind(this), undefined];
+      chain.unshift.apply(chain, requestInterceptorChain);
+      chain.push.apply(chain, responseInterceptorChain);
+      len = chain.length;
+
+      promise = Promise.resolve(config);
+
+      while (i < len) {
+        promise = promise.then(chain[i++], chain[i++]);
+      }
+
+      return promise;
+    }
+
+    len = requestInterceptorChain.length;
+
+    let newConfig = config;
+
+    i = 0;
+
+    while (i < len) {
+      const onFulfilled = requestInterceptorChain[i++];
+      const onRejected = requestInterceptorChain[i++];
+      try {
+        newConfig = onFulfilled(newConfig);
+      } catch (error) {
+        onRejected.call(this, error);
+        break;
+      }
+    }
+
+    try {
+      promise = dispatchRequest.call(this, newConfig);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    i = 0;
+    len = responseInterceptorChain.length;
+
+    while (i < len) {
+      promise = promise.then(responseInterceptorChain[i++], responseInterceptorChain[i++]);
+    }
+
+    return promise;
+  }
+
+  getUri(config) {
+    config = mergeConfig(this.defaults, config);
+    const fullPath = buildFullPath(config.baseURL, config.url);
+    return buildURL(fullPath, config.params, config.paramsSerializer);
+  }
+}
+
+// Provide aliases for supported request methods
+utils$1.forEach(['delete', 'get', 'head', 'options'], function forEachMethodNoData(method) {
+  /*eslint func-names:0*/
+  Axios.prototype[method] = function(url, config) {
+    return this.request(mergeConfig(config || {}, {
+      method,
+      url,
+      data: (config || {}).data
+    }));
+  };
+});
+
+utils$1.forEach(['post', 'put', 'patch'], function forEachMethodWithData(method) {
+  /*eslint func-names:0*/
+
+  function generateHTTPMethod(isForm) {
+    return function httpMethod(url, data, config) {
+      return this.request(mergeConfig(config || {}, {
+        method,
+        headers: isForm ? {
+          'Content-Type': 'multipart/form-data'
+        } : {},
+        url,
+        data
+      }));
+    };
+  }
+
+  Axios.prototype[method] = generateHTTPMethod();
+
+  Axios.prototype[method + 'Form'] = generateHTTPMethod(true);
+});
+
+const Axios$1 = Axios;
+
+/**
+ * A `CancelToken` is an object that can be used to request cancellation of an operation.
+ *
+ * @param {Function} executor The executor function.
+ *
+ * @returns {CancelToken}
+ */
+class CancelToken {
+  constructor(executor) {
+    if (typeof executor !== 'function') {
+      throw new TypeError('executor must be a function.');
+    }
+
+    let resolvePromise;
+
+    this.promise = new Promise(function promiseExecutor(resolve) {
+      resolvePromise = resolve;
+    });
+
+    const token = this;
+
+    // eslint-disable-next-line func-names
+    this.promise.then(cancel => {
+      if (!token._listeners) return;
+
+      let i = token._listeners.length;
+
+      while (i-- > 0) {
+        token._listeners[i](cancel);
+      }
+      token._listeners = null;
+    });
+
+    // eslint-disable-next-line func-names
+    this.promise.then = onfulfilled => {
+      let _resolve;
+      // eslint-disable-next-line func-names
+      const promise = new Promise(resolve => {
+        token.subscribe(resolve);
+        _resolve = resolve;
+      }).then(onfulfilled);
+
+      promise.cancel = function reject() {
+        token.unsubscribe(_resolve);
+      };
+
+      return promise;
+    };
+
+    executor(function cancel(message, config, request) {
+      if (token.reason) {
+        // Cancellation has already been requested
+        return;
+      }
+
+      token.reason = new CanceledError(message, config, request);
+      resolvePromise(token.reason);
+    });
+  }
+
+  /**
+   * Throws a `CanceledError` if cancellation has been requested.
+   */
+  throwIfRequested() {
+    if (this.reason) {
+      throw this.reason;
+    }
+  }
+
+  /**
+   * Subscribe to the cancel signal
+   */
+
+  subscribe(listener) {
+    if (this.reason) {
+      listener(this.reason);
+      return;
+    }
+
+    if (this._listeners) {
+      this._listeners.push(listener);
+    } else {
+      this._listeners = [listener];
+    }
+  }
+
+  /**
+   * Unsubscribe from the cancel signal
+   */
+
+  unsubscribe(listener) {
+    if (!this._listeners) {
+      return;
+    }
+    const index = this._listeners.indexOf(listener);
+    if (index !== -1) {
+      this._listeners.splice(index, 1);
+    }
+  }
+
+  /**
+   * Returns an object that contains a new `CancelToken` and a function that, when called,
+   * cancels the `CancelToken`.
+   */
+  static source() {
+    let cancel;
+    const token = new CancelToken(function executor(c) {
+      cancel = c;
+    });
+    return {
+      token,
+      cancel
+    };
+  }
+}
+
+const CancelToken$1 = CancelToken;
+
+/**
+ * Syntactic sugar for invoking a function and expanding an array for arguments.
+ *
+ * Common use case would be to use `Function.prototype.apply`.
+ *
+ *  ```js
+ *  function f(x, y, z) {}
+ *  var args = [1, 2, 3];
+ *  f.apply(null, args);
+ *  ```
+ *
+ * With `spread` this example can be re-written.
+ *
+ *  ```js
+ *  spread(function(x, y, z) {})([1, 2, 3]);
+ *  ```
+ *
+ * @param {Function} callback
+ *
+ * @returns {Function}
+ */
+function spread(callback) {
+  return function wrap(arr) {
+    return callback.apply(null, arr);
+  };
+}
+
+/**
+ * Determines whether the payload is an error thrown by Axios
+ *
+ * @param {*} payload The value to test
+ *
+ * @returns {boolean} True if the payload is an error thrown by Axios, otherwise false
+ */
+function isAxiosError(payload) {
+  return utils$1.isObject(payload) && (payload.isAxiosError === true);
+}
+
+const HttpStatusCode = {
+  Continue: 100,
+  SwitchingProtocols: 101,
+  Processing: 102,
+  EarlyHints: 103,
+  Ok: 200,
+  Created: 201,
+  Accepted: 202,
+  NonAuthoritativeInformation: 203,
+  NoContent: 204,
+  ResetContent: 205,
+  PartialContent: 206,
+  MultiStatus: 207,
+  AlreadyReported: 208,
+  ImUsed: 226,
+  MultipleChoices: 300,
+  MovedPermanently: 301,
+  Found: 302,
+  SeeOther: 303,
+  NotModified: 304,
+  UseProxy: 305,
+  Unused: 306,
+  TemporaryRedirect: 307,
+  PermanentRedirect: 308,
+  BadRequest: 400,
+  Unauthorized: 401,
+  PaymentRequired: 402,
+  Forbidden: 403,
+  NotFound: 404,
+  MethodNotAllowed: 405,
+  NotAcceptable: 406,
+  ProxyAuthenticationRequired: 407,
+  RequestTimeout: 408,
+  Conflict: 409,
+  Gone: 410,
+  LengthRequired: 411,
+  PreconditionFailed: 412,
+  PayloadTooLarge: 413,
+  UriTooLong: 414,
+  UnsupportedMediaType: 415,
+  RangeNotSatisfiable: 416,
+  ExpectationFailed: 417,
+  ImATeapot: 418,
+  MisdirectedRequest: 421,
+  UnprocessableEntity: 422,
+  Locked: 423,
+  FailedDependency: 424,
+  TooEarly: 425,
+  UpgradeRequired: 426,
+  PreconditionRequired: 428,
+  TooManyRequests: 429,
+  RequestHeaderFieldsTooLarge: 431,
+  UnavailableForLegalReasons: 451,
+  InternalServerError: 500,
+  NotImplemented: 501,
+  BadGateway: 502,
+  ServiceUnavailable: 503,
+  GatewayTimeout: 504,
+  HttpVersionNotSupported: 505,
+  VariantAlsoNegotiates: 506,
+  InsufficientStorage: 507,
+  LoopDetected: 508,
+  NotExtended: 510,
+  NetworkAuthenticationRequired: 511,
+};
+
+Object.entries(HttpStatusCode).forEach(([key, value]) => {
+  HttpStatusCode[value] = key;
+});
+
+const HttpStatusCode$1 = HttpStatusCode;
+
+/**
+ * Create an instance of Axios
+ *
+ * @param {Object} defaultConfig The default config for the instance
+ *
+ * @returns {Axios} A new instance of Axios
+ */
+function createInstance(defaultConfig) {
+  const context = new Axios$1(defaultConfig);
+  const instance = bind(Axios$1.prototype.request, context);
+
+  // Copy axios.prototype to instance
+  utils$1.extend(instance, Axios$1.prototype, context, {allOwnKeys: true});
+
+  // Copy context to instance
+  utils$1.extend(instance, context, null, {allOwnKeys: true});
+
+  // Factory for creating new instances
+  instance.create = function create(instanceConfig) {
+    return createInstance(mergeConfig(defaultConfig, instanceConfig));
+  };
+
+  return instance;
+}
+
+// Create the default instance to be exported
+const axios = createInstance(defaults$1);
+
+// Expose Axios class to allow class inheritance
+axios.Axios = Axios$1;
+
+// Expose Cancel & CancelToken
+axios.CanceledError = CanceledError;
+axios.CancelToken = CancelToken$1;
+axios.isCancel = isCancel;
+axios.VERSION = VERSION;
+axios.toFormData = toFormData;
+
+// Expose AxiosError class
+axios.AxiosError = AxiosError;
+
+// alias for CanceledError for backward compatibility
+axios.Cancel = axios.CanceledError;
+
+// Expose all/spread
+axios.all = function all(promises) {
+  return Promise.all(promises);
+};
+
+axios.spread = spread;
+
+// Expose isAxiosError
+axios.isAxiosError = isAxiosError;
+
+// Expose mergeConfig
+axios.mergeConfig = mergeConfig;
+
+axios.AxiosHeaders = AxiosHeaders$1;
+
+axios.formToJSON = thing => formDataToJSON(utils$1.isHTMLForm(thing) ? new FormData(thing) : thing);
+
+axios.getAdapter = adapters.getAdapter;
+
+axios.HttpStatusCode = HttpStatusCode$1;
+
+axios.default = axios;
+
+module.exports = axios;
+//# sourceMappingURL=axios.cjs.map
+
 
 /***/ }),
 
