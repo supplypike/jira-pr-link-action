@@ -1,4 +1,4 @@
-import {expect, jest, test, describe, it} from '@jest/globals'
+import {expect, jest, test, describe, it, beforeEach} from '@jest/globals'
 import {Version3Client} from 'jira.js'
 import {JiraClient, JiraClientImpl, JiraConfig} from '../src/jira'
 

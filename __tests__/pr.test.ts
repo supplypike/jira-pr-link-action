@@ -1,4 +1,4 @@
-import {expect, jest, test, describe} from '@jest/globals'
+import {expect, jest, test, describe, beforeEach} from '@jest/globals'
 import {PullRequestEvent} from '@octokit/webhooks-types'
 import * as core from '@actions/core'
 
