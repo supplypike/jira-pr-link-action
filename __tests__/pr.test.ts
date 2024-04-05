@@ -1,3 +1,4 @@
+import {expect, jest, test, describe, beforeEach} from '@jest/globals'
 import {PullRequestEvent} from '@octokit/webhooks-types'
 import * as core from '@actions/core'
 
@@ -11,7 +12,7 @@ let mock: PullRequestEvent
 
 jest.mock('@actions/core')
 jest.mock('../src/jira')
-const mockClient = jest.mocked(JiraClientImpl, true)
+const mockClient = jest.mocked(JiraClientImpl)
 
 beforeEach(() => {
   options = {
@@ -87,8 +88,8 @@ describe('#validate', () => {
 })
 
 describe('#process', () => {
-  let setFailedSpy: jest.SpyInstance
-  let mockValidate: jest.Mock
+  let setFailedSpy: jest.Spied<typeof core.setFailed>
+  const mockValidate = jest.fn<typeof validate>()
   let context: any
   const mockInputs: Record<string, string> = {
     project: 'SRENEW',
@@ -101,7 +102,7 @@ describe('#process', () => {
       eventName: 'pull_request',
       payload: pr
     }
-    mockValidate = jest.fn().mockResolvedValue(true)
+    mockValidate.mockResolvedValue(true)
     setFailedSpy = jest.spyOn(core, 'setFailed').mockReturnValue()
     jest
       .spyOn(core, 'getInput')
