@@ -1,10 +1,10 @@
-import {expect, jest, test, describe, it, beforeEach} from '@jest/globals'
+import {beforeEach, describe, expect, it, test, vi} from 'vitest'
 import {Version3Client} from 'jira.js'
 import {JiraClient, JiraClientImpl, JiraConfig} from '../src/jira'
 
-jest.mock('jira.js')
-jest.mock('@actions/core')
-const mockJira = jest.mocked(Version3Client)
+vi.mock('jira.js')
+vi.mock('@actions/core')
+const mockJira = vi.mocked(Version3Client)
 
 beforeEach(() => {
   mockJira.mockClear()
@@ -33,7 +33,7 @@ describe('JiraClientImpl', () => {
 
   describe('#issueExists - issue exists', () => {
     let client: JiraClient
-    const mockGetIssue = jest
+    const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
       .mockResolvedValue({})
 
@@ -58,7 +58,7 @@ describe('JiraClientImpl', () => {
 
   describe('#issueExists - issue does not exists', () => {
     let client: JiraClient
-    const mockGetIssue = jest
+    const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
       .mockRejectedValue(new Error('Not Found'))
 

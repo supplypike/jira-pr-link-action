@@ -1,4 +1,4 @@
-import {expect, jest, test, describe, beforeEach} from '@jest/globals'
+import {beforeEach, describe, expect, test, vi} from 'vitest'
 import {PullRequestEvent} from '@octokit/webhooks-types'
 import * as core from '@actions/core'
 
@@ -10,9 +10,9 @@ import {JiraClientImpl} from '../src/jira'
 let options: Options
 let mock: PullRequestEvent
 
-jest.mock('@actions/core')
-jest.mock('../src/jira')
-const mockClient = jest.mocked(JiraClientImpl)
+vi.mock('@actions/core')
+vi.mock('../src/jira')
+const mockClient = vi.mocked(JiraClientImpl)
 
 beforeEach(() => {
   options = {
@@ -67,7 +67,7 @@ describe('#validate', () => {
   })
 
   test('invalid when jira card does not exist', async () => {
-    jest.spyOn(JiraClientImpl.prototype, 'issueExists').mockResolvedValue(false)
+    vi.spyOn(JiraClientImpl.prototype, 'issueExists').mockResolvedValue(false)
 
     mock.pull_request.title =
       'Update the README with new information | SRENEW-0000'
@@ -88,8 +88,8 @@ describe('#validate', () => {
 })
 
 describe('#process', () => {
-  let setFailedSpy: jest.Spied<typeof core.setFailed>
-  const mockValidate = jest.fn<typeof validate>()
+  let setFailedSpy: ReturnType<typeof vi.spyOn>
+  const mockValidate = vi.fn<typeof validate>()
   let context: any
   const mockInputs: Record<string, string> = {
     project: 'SRENEW',
@@ -103,8 +103,8 @@ describe('#process', () => {
       payload: pr
     }
     mockValidate.mockResolvedValue(true)
-    setFailedSpy = jest.spyOn(core, 'setFailed').mockReturnValue()
-    jest
+    setFailedSpy = vi.spyOn(core, 'setFailed').mockImplementation(() => {})
+    vi
       .spyOn(core, 'getInput')
       .mockImplementation((name: string) => mockInputs[name])
   })
