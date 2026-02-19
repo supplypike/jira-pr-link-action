@@ -1,135 +1,135 @@
-import {beforeEach, describe, expect, test, vi} from 'vitest'
-import {PullRequestEvent} from '@octokit/webhooks-types'
-import * as core from '@actions/core'
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { PullRequestEvent } from "@octokit/webhooks-types";
+import * as core from "@actions/core";
 
-import {validate, process} from '../src/pr'
-import {pr} from '../src/mock/pull_request_mock'
-import {Options} from '../src/options'
-import {JiraClientImpl} from '../src/jira'
+import { validate, process } from "../src/pr";
+import { pr } from "../src/mock/pull_request_mock";
+import type { Options } from "../src/options";
+import { JiraClientImpl } from "../src/jira";
 
-let options: Options
-let mock: PullRequestEvent
+let options: Options;
+let mock: PullRequestEvent;
 
-vi.mock('@actions/core')
-vi.mock('../src/jira')
-const mockClient = vi.mocked(JiraClientImpl)
+vi.mock("@actions/core");
+vi.mock("../src/jira");
+const mockClient = vi.mocked(JiraClientImpl);
 
 beforeEach(() => {
   options = {
-    project: 'SRENEW',
+    project: "SRENEW",
     ignoreAuthor: [],
     jira: {
-      host: 'https://jira.example.com',
-      email: 'test@example.com',
-      apiToken: '1234567890'
-    }
-  }
-})
+      host: "https://jira.example.com",
+      email: "test@example.com",
+      apiToken: "1234567890",
+    },
+  };
+});
 
-describe('#validate', () => {
+describe("#validate", () => {
   beforeEach(() => {
-    mock = JSON.parse(JSON.stringify(pr))
-    mockClient.prototype.issueExists.mockResolvedValue(true)
-  })
+    mock = JSON.parse(JSON.stringify(pr));
+    mockClient.prototype.issueExists.mockResolvedValue(true);
+  });
 
-  test('invalid PR', async () => {
-    expect(await validate(pr, options)).toEqual(false)
-  })
+  test("invalid PR", async () => {
+    expect(await validate(pr, options)).toEqual(false);
+  });
 
-  test('valid PR title', async () => {
+  test("valid PR title", async () => {
     mock.pull_request.title =
-      'Update the README with new information | SRENEW-1234'
+      "Update the README with new information | SRENEW-1234";
 
-    expect(await validate(mock, options)).toEqual(true)
-  })
+    expect(await validate(mock, options)).toEqual(true);
+  });
 
-  test('valid PR branch', async () => {
-    mock.pull_request.head.ref = 'foo-SRENEW-1234'
+  test("valid PR branch", async () => {
+    mock.pull_request.head.ref = "foo-SRENEW-1234";
 
-    expect(await validate(mock, options)).toEqual(true)
-  })
+    expect(await validate(mock, options)).toEqual(true);
+  });
 
-  test('works with regex options', async () => {
-    options.project = '(SRENEW|FOO)'
+  test("works with regex options", async () => {
+    options.project = "(SRENEW|FOO)";
 
-    mock.pull_request.head.ref = 'foo-FOO-1234'
-    expect(await validate(mock, options)).toEqual(true)
+    mock.pull_request.head.ref = "foo-FOO-1234";
+    expect(await validate(mock, options)).toEqual(true);
 
-    mock.pull_request.head.ref = 'foo-SRENEW-1234'
-    expect(await validate(mock, options)).toEqual(true)
-  })
+    mock.pull_request.head.ref = "foo-SRENEW-1234";
+    expect(await validate(mock, options)).toEqual(true);
+  });
 
-  test('valid if ignoreAuthor matches', async () => {
-    options.ignoreAuthor = ['dependabot[bot]']
-    mock.pull_request.user.login = 'dependabot[bot]'
+  test("valid if ignoreAuthor matches", async () => {
+    options.ignoreAuthor = ["dependabot[bot]"];
+    mock.pull_request.user.login = "dependabot[bot]";
 
-    expect(await validate(mock, options)).toEqual(true)
-  })
+    expect(await validate(mock, options)).toEqual(true);
+  });
 
-  test('invalid when jira card does not exist', async () => {
-    vi.spyOn(JiraClientImpl.prototype, 'issueExists').mockResolvedValue(false)
-
-    mock.pull_request.title =
-      'Update the README with new information | SRENEW-0000'
-
-    expect(await validate(mock, options)).toEqual(false)
-  })
-
-  test('invalid when one jira card does not exist', async () => {
-    mockClient.prototype.issueExists.mockImplementation(x =>
-      Promise.resolve(x === 'SRENEW-1234')
-    )
+  test("invalid when jira card does not exist", async () => {
+    vi.spyOn(JiraClientImpl.prototype, "issueExists").mockResolvedValue(false);
 
     mock.pull_request.title =
-      'Update the README with new information | SRENEW-0000,SRENEW-1234'
+      "Update the README with new information | SRENEW-0000";
 
-    expect(await validate(mock, options)).toEqual(false)
-  })
-})
+    expect(await validate(mock, options)).toEqual(false);
+  });
 
-describe('#process', () => {
-  let setFailedSpy: ReturnType<typeof vi.spyOn>
-  const mockValidate = vi.fn<typeof validate>()
-  let context: any
+  test("invalid when one jira card does not exist", async () => {
+    mockClient.prototype.issueExists.mockImplementation((x) =>
+      Promise.resolve(x === "SRENEW-1234"),
+    );
+
+    mock.pull_request.title =
+      "Update the README with new information | SRENEW-0000,SRENEW-1234";
+
+    expect(await validate(mock, options)).toEqual(false);
+  });
+});
+
+describe("#process", () => {
+  let setFailedSpy: ReturnType<typeof vi.spyOn>;
+  const mockValidate = vi.fn<typeof validate>();
+  let context: { eventName: string; payload?: PullRequestEvent };
   const mockInputs: Record<string, string> = {
-    project: 'SRENEW',
-    'jira-host': 'https://jira.example.com',
-    'jira-email': 'test@example.com',
-    'jira-api-token': '1234567890'
-  }
+    project: "SRENEW",
+    "jira-host": "https://jira.example.com",
+    "jira-email": "test@example.com",
+    "jira-api-token": "1234567890",
+  };
   beforeEach(() => {
     context = {
-      eventName: 'pull_request',
-      payload: pr
-    }
-    mockValidate.mockResolvedValue(true)
-    setFailedSpy = vi.spyOn(core, 'setFailed').mockImplementation(() => {})
-    vi
-      .spyOn(core, 'getInput')
-      .mockImplementation((name: string) => mockInputs[name])
-  })
+      eventName: "pull_request",
+      payload: pr,
+    };
+    mockValidate.mockResolvedValue(true);
+    setFailedSpy = vi.spyOn(core, "setFailed").mockImplementation(() => {});
+    vi.spyOn(core, "getInput").mockImplementation(
+      (name: string) => mockInputs[name],
+    );
+  });
 
-  test('calls validate w/ input options', async () => {
-    await process(context, mockValidate)
-    expect(mockValidate).toHaveBeenCalledTimes(1)
-    expect(mockValidate).toHaveBeenCalledWith(pr, options)
-  })
+  test("calls validate w/ input options", async () => {
+    await process(context, mockValidate);
+    expect(mockValidate).toHaveBeenCalledTimes(1);
+    expect(mockValidate).toHaveBeenCalledWith(pr, options);
+  });
 
-  test('calls setFailed when validation false', async () => {
-    mockValidate.mockResolvedValue(false)
+  test("calls setFailed when validation false", async () => {
+    mockValidate.mockResolvedValue(false);
 
-    await process(context, mockValidate)
+    await process(context, mockValidate);
 
-    expect(mockValidate).toHaveBeenCalledTimes(1)
-    expect(setFailedSpy).toHaveBeenCalledTimes(1)
-  })
+    expect(mockValidate).toHaveBeenCalledTimes(1);
+    expect(setFailedSpy).toHaveBeenCalledTimes(1);
+  });
 
-  test('no-op if not a pull request', async () => {
+  test("no-op if not a pull request", async () => {
     context = {
-      eventName: 'push'
-    }
-    await process(context, mockValidate)
-    expect(mockValidate).not.toHaveBeenCalled()
-    expect(setFailedSpy).not.toHaveBeenCalled()
-  })
-})
+      eventName: "push",
+    };
+    await process(context, mockValidate);
+    expect(mockValidate).not.toHaveBeenCalled();
+    expect(setFailedSpy).not.toHaveBeenCalled();
+  });
+});

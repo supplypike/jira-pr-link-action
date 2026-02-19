@@ -3,12 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "description": "TypeScript template action",
+  "type": "module",
   "main": "src/main.ts",
   "scripts": {
     "format": "biome format --write .",
-    "format-check": "biome format --check .",
+    "format-check": "biome format .",
     "lint": "biome lint .",
-    "build": "ncc build --source-map --license licenses.txt",
+    "build": "tsup",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "all": "npm run format-check && npm run lint && npm run build && npm run test:coverage"
@@ -32,10 +33,10 @@
   },
   "devDependencies": {
     "@types/node": "^24",
-    "@vercel/ncc": "^0.38.1",
     "@biomejs/biome": "^2.4.2",
     "@vitest/coverage-v8": "^4.0.18",
     "js-yaml": "^4.1.0",
+    "tsup": "^8.1.0",
     "typescript": "^5.4.5",
     "vitest": "^4.0.18"
   }

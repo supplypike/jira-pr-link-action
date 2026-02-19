@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.2/schema.json",
   "files": {
-    "ignore": ["dist/**", "lib/**", "node_modules/**", "coverage/**"]
+    "includes": ["**", "!dist", "!lib", "!node_modules", "!coverage"]
   },
   "formatter": {
     "enabled": true,
@@ -9,13 +9,23 @@
     "indentWidth": 2,
     "lineWidth": 80
   },
-  "organizeImports": {
-    "enabled": true
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
   },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true
     }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
   }
 }
