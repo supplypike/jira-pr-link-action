@@ -27,5 +27,11 @@
     "enabled": true,
     "clientKind": "git",
     "useIgnoreFile": true
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded"
+    }
   }
 }

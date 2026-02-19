@@ -1,94 +1,92 @@
-import { beforeEach, describe, expect, it, test, vi } from "vitest";
-import { Version3Client } from "jira.js";
-import { JiraClientImpl } from "../src/jira";
-import type { JiraClient, JiraConfig } from "../src/jira";
+import { beforeEach, describe, expect, it, test, vi } from 'vitest'
+import { Version3Client } from 'jira.js'
+import { JiraClientImpl } from '../src/jira'
+import type { JiraClient, JiraConfig } from '../src/jira'
 
-vi.mock("jira.js");
-vi.mock("@actions/core");
-const mockJira = vi.mocked(Version3Client);
+vi.mock('jira.js')
+vi.mock('@actions/core')
+const mockJira = vi.mocked(Version3Client)
 
 beforeEach(() => {
-  mockJira.mockClear();
-});
+  mockJira.mockClear()
+})
 
-describe("JiraClientImpl", () => {
+describe('JiraClientImpl', () => {
   const jiraConfig: JiraConfig = {
-    host: "https://jira.example.com",
-    email: "test@example.com",
-    apiToken: "1234567890",
-  };
+    host: 'https://jira.example.com',
+    email: 'test@example.com',
+    apiToken: '1234567890',
+  }
 
-  test("constructor", async () => {
-    new JiraClientImpl(jiraConfig);
+  test('constructor', async () => {
+    new JiraClientImpl(jiraConfig)
 
     expect(mockJira).toHaveBeenCalledWith({
-      host: "https://jira.example.com",
+      host: 'https://jira.example.com',
       authentication: {
         basic: {
-          email: "test@example.com",
-          apiToken: "1234567890",
+          email: 'test@example.com',
+          apiToken: '1234567890',
         },
       },
-    });
-  });
+    })
+  })
 
-  describe("#issueExists - issue exists", () => {
-    let client: JiraClient;
+  describe('#issueExists - issue exists', () => {
+    let client: JiraClient
     const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
-      .mockResolvedValue({});
+      .mockResolvedValue({})
 
     beforeEach(() => {
       // biome-ignore lint/complexity/useArrowFunction: mock needs constructor semantics
       mockJira.mockImplementation(function () {
         return {
           issues: { getIssue: mockGetIssue },
-        } as unknown as Version3Client;
-      });
-      client = new JiraClientImpl(jiraConfig);
-    });
+        } as unknown as Version3Client
+      })
+      client = new JiraClientImpl(jiraConfig)
+    })
 
-    it("calls client.issues.getIssue()", async () => {
-      await client.issueExists("SRENEW-1234");
-      expect(mockGetIssue).toHaveBeenCalledTimes(1);
+    it('calls client.issues.getIssue()', async () => {
+      await client.issueExists('SRENEW-1234')
+      expect(mockGetIssue).toHaveBeenCalledTimes(1)
       expect(mockGetIssue).toHaveBeenCalledWith({
-        issueIdOrKey: "SRENEW-1234",
-      });
-    });
+        issueIdOrKey: 'SRENEW-1234',
+      })
+    })
 
-    it("returns true", async () => {
-      const result = await client.issueExists("SRENEW-1234");
-      expect(result).toEqual(true);
-    });
-  });
+    it('returns true', async () => {
+      const result = await client.issueExists('SRENEW-1234')
+      expect(result).toEqual(true)
+    })
+  })
 
-  describe("#issueExists - issue does not exists", () => {
-    let client: JiraClient;
+  describe('#issueExists - issue does not exists', () => {
+    let client: JiraClient
     const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
-      .mockRejectedValue(new Error("Not Found"));
+      .mockRejectedValue(new Error('Not Found'))
 
     beforeEach(() => {
       // biome-ignore lint/complexity/useArrowFunction: mock needs constructor semantics
       mockJira.mockImplementation(function () {
         return {
           issues: { getIssue: mockGetIssue },
-        } as unknown as Version3Client;
-      });
-      client = new JiraClientImpl(jiraConfig);
-    });
+        } as unknown as Version3Client
+      })
+      client = new JiraClientImpl(jiraConfig)
+    })
 
-    it("returns false", async () => {
-      const result = await client.issueExists("SRENEW-1234");
-      expect(result).toEqual(false);
-    });
+    it('returns false', async () => {
+      const result = await client.issueExists('SRENEW-1234')
+      expect(result).toEqual(false)
+    })
 
-    it("calls client.issues.getIssue()", async () => {
-      await client.issueExists("SRENEW-1234");
-      expect(mockGetIssue).toHaveBeenCalledTimes(1);
-      expect(mockGetIssue).toHaveBeenCalledWith({
-        issueIdOrKey: "SRENEW-1234",
-      });
-    });
-  });
-});
+    it('calls client.issues.getIssue()', async () => {
+      await client.issueExists('SRENEW-1234')
+      expect(mockGetIssue).toHaveBeenCalledTimes(1)
+      expect(mockGetIssue).toHaveBeenCalledWith({ issueIdOrKey: 'SRENEW-1234' })
+    })
+  })
+})
