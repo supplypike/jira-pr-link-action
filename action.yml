@@ -19,4 +19,4 @@ inputs:
     description: 'JIRA API Token'
 runs:
   using: 'node24'
-  main: 'dist/main.cjs'
+  main: 'dist/index.cjs'
