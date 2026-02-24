@@ -1,12 +1,12 @@
 import * as core from '@actions/core'
-import {Context} from '@actions/github/lib/context'
-import {PullRequestEvent} from '@octokit/webhooks-types'
-import {JiraClientImpl} from './jira'
-import {getInput, Options} from './options'
+import type { Context } from '@actions/github'
+import type { PullRequestEvent } from '@octokit/webhooks-types'
+import { JiraClientImpl } from './jira'
+import { getInput, type Options } from './options'
 
 export async function process(
   context: Context,
-  isValid = validate
+  isValid = validate,
 ): Promise<void> {
   if (context.eventName !== 'pull_request') {
     core.debug('Not a pull request')
@@ -18,7 +18,7 @@ export async function process(
 
   if (!valid) {
     core.setFailed(
-      'Invalid Pull Request: missing JIRA project in title or branch'
+      'Invalid Pull Request: missing JIRA project in title or branch',
     )
   }
 }
@@ -31,19 +31,19 @@ export async function process(
  */
 export async function validate(
   event: PullRequestEvent,
-  options: Options
+  options: Options,
 ): Promise<boolean> {
-  const {project} = options
+  const { project } = options
   const re = RegExp(`(${project}-[0-9]+)+`, 'g')
 
   const jira = new JiraClientImpl(options.jira)
 
-  core.debug('author ' + event.pull_request.user.login.toLowerCase())
-  core.debug('title ' + event.pull_request.title)
-  core.debug('head ' + event.pull_request.head.ref)
+  core.debug(`author ${event.pull_request.user.login.toLowerCase()}`)
+  core.debug(`title ${event.pull_request.title}`)
+  core.debug(`head ${event.pull_request.head.ref}`)
 
   for (const author of options.ignoreAuthor) {
-    if (event.pull_request.user.login.toLowerCase() == author.toLowerCase()) {
+    if (event.pull_request.user.login.toLowerCase() === author.toLowerCase()) {
       return true
     }
   }
@@ -58,10 +58,10 @@ export async function validate(
   }
 
   for (const match of matches) {
-    core.debug('Checking Jira issue ' + match)
+    core.debug(`Checking Jira issue ${match}`)
     const exists = await jira.issueExists(match)
     if (!exists) {
-      core.error('Issue does not exist: ' + match)
+      core.error(`Issue does not exist: ${match}`)
       return false
     }
   }

@@ -10,9 +10,9 @@ jobs:
   build: # make sure build/ci work properly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set Node.js 20.x
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v6
+      - name: Set Node.js
+        uses: actions/setup-node@v6
         with:
           node-version-file: .tool-versions
           cache: 'npm'
@@ -20,7 +20,7 @@ jobs:
           npm ci
       - run: |
           npm run all
-      - uses: sonarsource/sonarqube-scan-action@v1.1.0
+      - uses: sonarsource/sonarqube-scan-action@v7.0.0
         if: ${{ github.actor != 'dependabot[bot]' }}
         with:
           args: >

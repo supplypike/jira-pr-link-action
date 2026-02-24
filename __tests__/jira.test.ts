@@ -1,10 +1,11 @@
-import {expect, jest, test, describe, it, beforeEach} from '@jest/globals'
-import {Version3Client} from 'jira.js'
-import {JiraClient, JiraClientImpl, JiraConfig} from '../src/jira'
+import { beforeEach, describe, expect, it, test, vi } from 'vitest'
+import { Version3Client } from 'jira.js'
+import { JiraClientImpl } from '../src/jira'
+import type { JiraClient, JiraConfig } from '../src/jira'
 
-jest.mock('jira.js')
-jest.mock('@actions/core')
-const mockJira = jest.mocked(Version3Client)
+vi.mock('jira.js')
+vi.mock('@actions/core')
+const mockJira = vi.mocked(Version3Client)
 
 beforeEach(() => {
   mockJira.mockClear()
@@ -14,7 +15,7 @@ describe('JiraClientImpl', () => {
   const jiraConfig: JiraConfig = {
     host: 'https://jira.example.com',
     email: 'test@example.com',
-    apiToken: '1234567890'
+    apiToken: '1234567890',
   }
 
   test('constructor', async () => {
@@ -25,21 +26,24 @@ describe('JiraClientImpl', () => {
       authentication: {
         basic: {
           email: 'test@example.com',
-          apiToken: '1234567890'
-        }
-      }
+          apiToken: '1234567890',
+        },
+      },
     })
   })
 
   describe('#issueExists - issue exists', () => {
     let client: JiraClient
-    const mockGetIssue = jest
+    const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
       .mockResolvedValue({})
 
     beforeEach(() => {
-      mockJira.mockImplementation(() => {
-        return {issues: {getIssue: mockGetIssue}} as any
+      // biome-ignore lint/complexity/useArrowFunction: mock needs constructor semantics
+      mockJira.mockImplementation(function () {
+        return {
+          issues: { getIssue: mockGetIssue },
+        } as unknown as Version3Client
       })
       client = new JiraClientImpl(jiraConfig)
     })
@@ -47,7 +51,9 @@ describe('JiraClientImpl', () => {
     it('calls client.issues.getIssue()', async () => {
       await client.issueExists('SRENEW-1234')
       expect(mockGetIssue).toHaveBeenCalledTimes(1)
-      expect(mockGetIssue).toHaveBeenCalledWith({issueIdOrKey: 'SRENEW-1234'})
+      expect(mockGetIssue).toHaveBeenCalledWith({
+        issueIdOrKey: 'SRENEW-1234',
+      })
     })
 
     it('returns true', async () => {
@@ -58,13 +64,16 @@ describe('JiraClientImpl', () => {
 
   describe('#issueExists - issue does not exists', () => {
     let client: JiraClient
-    const mockGetIssue = jest
+    const mockGetIssue = vi
       .fn<typeof Version3Client.prototype.issues.getIssue>()
       .mockRejectedValue(new Error('Not Found'))
 
     beforeEach(() => {
-      mockJira.mockImplementation(() => {
-        return {issues: {getIssue: mockGetIssue}} as any
+      // biome-ignore lint/complexity/useArrowFunction: mock needs constructor semantics
+      mockJira.mockImplementation(function () {
+        return {
+          issues: { getIssue: mockGetIssue },
+        } as unknown as Version3Client
       })
       client = new JiraClientImpl(jiraConfig)
     })
@@ -77,7 +86,7 @@ describe('JiraClientImpl', () => {
     it('calls client.issues.getIssue()', async () => {
       await client.issueExists('SRENEW-1234')
       expect(mockGetIssue).toHaveBeenCalledTimes(1)
-      expect(mockGetIssue).toHaveBeenCalledWith({issueIdOrKey: 'SRENEW-1234'})
+      expect(mockGetIssue).toHaveBeenCalledWith({ issueIdOrKey: 'SRENEW-1234' })
     })
   })
 })

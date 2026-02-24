@@ -1,4 +1,4 @@
-import {PullRequestEvent} from '@octokit/webhooks-types'
+import type { PullRequestEvent } from '@octokit/webhooks-types'
 
 // @see https://github.com/octokit/webhooks/blob/master/payload-examples/api.github.com/pull_request/opened.payload.json
 export const pr: PullRequestEvent = {
@@ -38,7 +38,7 @@ export const pr: PullRequestEvent = {
       received_events_url:
         'https://api.github.com/users/Codertocat/received_events',
       type: 'User',
-      site_admin: false
+      site_admin: false,
     },
     body: 'This is a pretty simple change that we need to pull into master.',
     created_at: '2019-05-15T15:20:33Z',
@@ -70,8 +70,8 @@ export const pr: PullRequestEvent = {
         received_events_url:
           'https://api.github.com/users/Codertocat/received_events',
         type: 'User',
-        site_admin: false
-      }
+        site_admin: false,
+      },
     ],
     requested_reviewers: [
       {
@@ -95,8 +95,8 @@ export const pr: PullRequestEvent = {
         received_events_url:
           'https://api.github.com/users/octocat/received_events',
         type: 'User',
-        site_admin: false
-      }
+        site_admin: false,
+      },
     ],
     requested_teams: [],
     labels: [
@@ -107,8 +107,8 @@ export const pr: PullRequestEvent = {
         name: 'bug',
         color: 'd73a4a',
         default: true,
-        description: "Something isn't working"
-      }
+        description: "Something isn't working",
+      },
     ],
     milestone: null,
     commits_url:
@@ -147,7 +147,7 @@ export const pr: PullRequestEvent = {
         received_events_url:
           'https://api.github.com/users/Codertocat/received_events',
         type: 'User',
-        site_admin: false
+        site_admin: false,
       },
       repo: {
         id: 186853002,
@@ -178,7 +178,7 @@ export const pr: PullRequestEvent = {
           received_events_url:
             'https://api.github.com/users/Codertocat/received_events',
           type: 'User',
-          site_admin: false
+          site_admin: false,
         },
         html_url: 'https://github.com/Codertocat/Hello-World',
         description: null,
@@ -283,8 +283,8 @@ export const pr: PullRequestEvent = {
         topics: [],
         visibility: 'public',
         web_commit_signoff_required: false,
-        custom_properties: {}
-      }
+        custom_properties: {},
+      },
     },
     base: {
       label: 'Codertocat:master',
@@ -312,7 +312,7 @@ export const pr: PullRequestEvent = {
         received_events_url:
           'https://api.github.com/users/Codertocat/received_events',
         type: 'User',
-        site_admin: false
+        site_admin: false,
       },
       repo: {
         id: 186853002,
@@ -343,7 +343,7 @@ export const pr: PullRequestEvent = {
           received_events_url:
             'https://api.github.com/users/Codertocat/received_events',
           type: 'User',
-          site_admin: false
+          site_admin: false,
         },
         html_url: 'https://github.com/Codertocat/Hello-World',
         description: null,
@@ -448,32 +448,32 @@ export const pr: PullRequestEvent = {
         topics: [],
         visibility: 'public',
         web_commit_signoff_required: false,
-        custom_properties: {}
-      }
+        custom_properties: {},
+      },
     },
     _links: {
       self: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2',
       },
-      html: {href: 'https://github.com/Codertocat/Hello-World/pull/2'},
+      html: { href: 'https://github.com/Codertocat/Hello-World/pull/2' },
       issue: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2',
       },
       comments: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2/comments'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/issues/2/comments',
       },
       review_comments: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/comments'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/comments',
       },
       review_comment: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/comments{/number}'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/comments{/number}',
       },
       commits: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/commits'
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/pulls/2/commits',
       },
       statuses: {
-        href: 'https://api.github.com/repos/Codertocat/Hello-World/statuses/ec26c3e57ca3a959ca5aad62de7213c562f8c821'
-      }
+        href: 'https://api.github.com/repos/Codertocat/Hello-World/statuses/ec26c3e57ca3a959ca5aad62de7213c562f8c821',
+      },
     },
     author_association: 'OWNER',
     auto_merge: null,
@@ -490,7 +490,7 @@ export const pr: PullRequestEvent = {
     commits: 1,
     additions: 1,
     deletions: 1,
-    changed_files: 1
+    changed_files: 1,
   },
   repository: {
     id: 186853002,
@@ -520,7 +520,7 @@ export const pr: PullRequestEvent = {
       received_events_url:
         'https://api.github.com/users/Codertocat/received_events',
       type: 'User',
-      site_admin: false
+      site_admin: false,
     },
     html_url: 'https://github.com/Codertocat/Hello-World',
     description: null,
@@ -623,11 +623,11 @@ export const pr: PullRequestEvent = {
     topics: [],
     visibility: 'public',
     web_commit_signoff_required: false,
-    custom_properties: {}
+    custom_properties: {},
   },
   installation: {
     id: 1,
-    node_id: 'MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMQ=='
+    node_id: 'MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMQ==',
   },
   sender: {
     login: 'Codertocat',
@@ -650,6 +650,6 @@ export const pr: PullRequestEvent = {
     received_events_url:
       'https://api.github.com/users/Codertocat/received_events',
     type: 'User',
-    site_admin: false
-  }
+    site_admin: false,
+  },
 }
