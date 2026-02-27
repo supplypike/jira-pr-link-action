@@ -45386,8 +45386,8 @@ async function validate(event, options) {
 async function main() {
 	try {
 		await process$1(context);
-	} catch (error$1) {
-		error(`Error caught in main: ${error$1}`);
+	} catch (error) {
+		setFailed(`Action failed with error ${error}`);
 	}
 }
 main();
