@@ -34,7 +34,7 @@
   "bundledDependencies": true,
   "devDependencies": {
     "@biomejs/biome": "^2.4.2",
-    "@types/node": "^24",
+    "@types/node": "^25",
     "@vitest/coverage-v8": "^4.0.18",
     "js-yaml": "^4.1.0",
     "tsdown": "^0.20.3",
