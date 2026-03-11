@@ -59,13 +59,6 @@ describe('#validate', () => {
     expect(await validate(mock, options)).toEqual(true)
   })
 
-  test('valid if ignoreAuthor matches', async () => {
-    options.ignoreAuthor = ['dependabot[bot]']
-    mock.pull_request.user.login = 'dependabot[bot]'
-
-    expect(await validate(mock, options)).toEqual(true)
-  })
-
   test('invalid when jira card does not exist', async () => {
     vi.spyOn(JiraClientImpl.prototype, 'issueExists').mockResolvedValue(false)
 
@@ -97,16 +90,24 @@ describe('#process', () => {
     'jira-email': 'test@example.com',
     'jira-api-token': '1234567890',
   }
+  let mockIgnoreAuthors: string[] = []
   beforeEach(() => {
     context = {
       eventName: 'pull_request',
       payload: pr,
     }
+    mockIgnoreAuthors = []
     mockValidate.mockResolvedValue(true)
     setFailedSpy = vi.spyOn(core, 'setFailed').mockImplementation(() => {})
     vi.spyOn(core, 'getInput').mockImplementation(
       (name: string) => mockInputs[name],
     )
+    vi.spyOn(core, 'getMultilineInput').mockImplementation((name: string) => {
+      if (name === 'ignore-author') {
+        return mockIgnoreAuthors
+      }
+      return []
+    })
   })
 
   test('calls validate w/ input options', async () => {
@@ -130,6 +131,31 @@ describe('#process', () => {
     }
     await process(context, mockValidate)
     expect(mockValidate).not.toHaveBeenCalled()
+    expect(setFailedSpy).not.toHaveBeenCalled()
+  })
+
+  test('skips validation when author is in ignore list', async () => {
+    mockIgnoreAuthors = ['dependabot[bot]', 'renovate[bot]']
+    const mockPR = JSON.parse(JSON.stringify(pr))
+    mockPR.pull_request.user.login = 'dependabot[bot]'
+    context.payload = mockPR
+
+    await process(context, mockValidate)
+
+    expect(mockValidate).not.toHaveBeenCalled()
+    expect(setFailedSpy).not.toHaveBeenCalled()
+  })
+
+  test('continues validation when author is not in ignore list', async () => {
+    mockIgnoreAuthors = ['dependabot[bot]']
+    const mockPR = JSON.parse(JSON.stringify(pr))
+    mockPR.pull_request.user.login = 'some-user'
+    context.payload = mockPR
+    mockValidate.mockResolvedValue(true)
+
+    await process(context, mockValidate)
+
+    expect(mockValidate).toHaveBeenCalledTimes(1)
     expect(setFailedSpy).not.toHaveBeenCalled()
   })
 })

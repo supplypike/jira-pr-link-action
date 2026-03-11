@@ -7,6 +7,10 @@ export interface Options {
   jira: JiraConfig
 }
 
+export function getIgnoreAuthors(): string[] {
+  return core.getMultilineInput('ignore-author') || []
+}
+
 export function getInput(): Options {
   const project = core.getInput('project', { required: true })
   const ignoreAuthor = core.getMultilineInput('ignore-author') || []

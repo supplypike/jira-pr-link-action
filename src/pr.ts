@@ -3,6 +3,7 @@ import type { Context } from '@actions/github'
 import type { PullRequestEvent } from '@octokit/webhooks-types'
 import { JiraClientImpl } from './jira'
 import { getInput, type Options } from './options'
+import { getIgnoreAuthors } from './options.js'
 
 export async function process(
   context: Context,
@@ -14,6 +15,19 @@ export async function process(
   }
 
   const ev = context.payload as PullRequestEvent
+  const login = ev.pull_request.user.login
+  const ignoreAuthors = getIgnoreAuthors()
+
+  // check ignore authors before calling isValid or getInput to avoid unnecessary errors or api calls
+  for (const author of ignoreAuthors) {
+    if (login && login.toLowerCase() === author.toLowerCase()) {
+      core.info(
+        `Pull request created by ${login}, which is in the ignore list. Skipping validation.`,
+      )
+      return
+    }
+  }
+
   const valid = await isValid(ev, getInput())
 
   if (!valid) {
@@ -41,12 +55,6 @@ export async function validate(
   core.debug(`author ${event.pull_request.user.login.toLowerCase()}`)
   core.debug(`title ${event.pull_request.title}`)
   core.debug(`head ${event.pull_request.head.ref}`)
-
-  for (const author of options.ignoreAuthor) {
-    if (event.pull_request.user.login.toLowerCase() === author.toLowerCase()) {
-      return true
-    }
-  }
 
   const titleMatch = event.pull_request.title.match(re) || []
   const refMatch = event.pull_request.head.ref.match(re) || []
