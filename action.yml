@@ -7,7 +7,7 @@ inputs:
     description: 'JIRA Project'
   ignore-author:
     required: false
-    description: 'comma seperated list of authors to skip check for'
+    description: 'newline separated list of authors to skip check for'
   jira-host:
     required: true
     description: 'JIRA Domain'

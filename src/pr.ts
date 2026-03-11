@@ -2,8 +2,7 @@ import * as core from '@actions/core'
 import type { Context } from '@actions/github'
 import type { PullRequestEvent } from '@octokit/webhooks-types'
 import { JiraClientImpl } from './jira'
-import { getInput, type Options } from './options'
-import { getIgnoreAuthors } from './options.js'
+import { getInput, type Options, getIgnoreAuthors } from './options'
 
 export async function process(
   context: Context,
@@ -20,7 +19,7 @@ export async function process(
 
   // check ignore authors before calling isValid or getInput to avoid unnecessary errors or api calls
   for (const author of ignoreAuthors) {
-    if (login && login.toLowerCase() === author.toLowerCase()) {
+    if (login.toLowerCase() === author.toLowerCase()) {
       core.info(
         `Pull request created by ${login}, which is in the ignore list. Skipping validation.`,
       )

@@ -45341,7 +45341,7 @@ function getIgnoreAuthors() {
 function getInput() {
 	return {
 		project: getInput$1("project", { required: true }),
-		ignoreAuthor: getMultilineInput("ignore-author") || [],
+		ignoreAuthor: getIgnoreAuthors(),
 		jira: {
 			host: getInput$1("jira-host", { required: true }),
 			email: getInput$1("jira-email", { required: true }),
@@ -45360,7 +45360,7 @@ async function process$1(context, isValid = validate) {
 	const ev = context.payload;
 	const login = ev.pull_request.user.login;
 	const ignoreAuthors = getIgnoreAuthors();
-	for (const author of ignoreAuthors) if (login && login.toLowerCase() === author.toLowerCase()) {
+	for (const author of ignoreAuthors) if (login.toLowerCase() === author.toLowerCase()) {
 		info(`Pull request created by ${login}, which is in the ignore list. Skipping validation.`);
 		return;
 	}
