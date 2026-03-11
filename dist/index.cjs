@@ -19431,6 +19431,13 @@ function debug(message) {
 function error(message, properties = {}) {
 	issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+/**
+* Writes info to log with console.log.
+* @param message info message
+*/
+function info(message) {
+	process.stdout.write(message + os.EOL);
+}
 
 //#endregion
 //#region node_modules/axios/lib/helpers/bind.js
@@ -45328,10 +45335,13 @@ var JiraClientImpl = class {
 
 //#endregion
 //#region src/options.ts
+function getIgnoreAuthors() {
+	return getMultilineInput("ignore-author") || [];
+}
 function getInput() {
 	return {
 		project: getInput$1("project", { required: true }),
-		ignoreAuthor: getMultilineInput("ignore-author") || [],
+		ignoreAuthor: getIgnoreAuthors(),
 		jira: {
 			host: getInput$1("jira-host", { required: true }),
 			email: getInput$1("jira-email", { required: true }),
@@ -45348,6 +45358,12 @@ async function process$1(context, isValid = validate) {
 		return;
 	}
 	const ev = context.payload;
+	const login = ev.pull_request.user.login;
+	const ignoreAuthors = getIgnoreAuthors();
+	for (const author of ignoreAuthors) if (login.toLowerCase() === author.toLowerCase()) {
+		info(`Pull request created by ${login}, which is in the ignore list. Skipping validation.`);
+		return;
+	}
 	if (!await isValid(ev, getInput())) setFailed("Invalid Pull Request: missing JIRA project in title or branch");
 }
 /**
@@ -45363,7 +45379,6 @@ async function validate(event, options) {
 	debug(`author ${event.pull_request.user.login.toLowerCase()}`);
 	debug(`title ${event.pull_request.title}`);
 	debug(`head ${event.pull_request.head.ref}`);
-	for (const author of options.ignoreAuthor) if (event.pull_request.user.login.toLowerCase() === author.toLowerCase()) return true;
 	const titleMatch = event.pull_request.title.match(re) || [];
 	const refMatch = event.pull_request.head.ref.match(re) || [];
 	const matches = [...titleMatch, ...refMatch];
