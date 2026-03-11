@@ -41,4 +41,4 @@ These are some of the supported input parameters of action.
 | **`jira-host`**      | JIRA server URL                              | YES           |                                                                                               |
 | **`jira-email`**     | Login of JIRA user                           | YES           |                                                                                               |
 | **`jira-api-token`** | The token that goes with the `jira-email`    | YES           |                                                                                               |
-| **`ignore-author`**  | Newline seperated list of PR authors to ignore | NO            |                                                                                               |
+| **`ignore-author`**  | Newline separated list of PR authors to ignore | NO            |                                                                                               |
