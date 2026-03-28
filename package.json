@@ -33,7 +33,7 @@
   },
   "bundledDependencies": true,
   "devDependencies": {
-    "@biomejs/biome": "^2.4.2",
+    "@biomejs/biome": "^2.4.6",
     "@types/node": "^24",
     "@vitest/coverage-v8": "^4.0.18",
     "js-yaml": "^4.1.0",
